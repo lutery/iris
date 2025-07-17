@@ -20,8 +20,13 @@ class SingleProcessEnv(DoneTrackerEnv):
         return obs[None, ...]
 
     def step(self, action) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any]:
-        obs, reward, done, _ = self.env.step(action[0])  # action is supposed to be ndarray (1,)
-        done = np.array([done])
+        result = self.env.step(action[0])  # action is supposed to be ndarray (1,)
+        if len(result) == 4:
+            obs, reward, done, _ = result
+            truncated = False
+        else:  # len(result) == 5
+            obs, reward, done, truncated, _ = result
+        done = np.array([done or truncated])
         self.update_done_tracker(done)
         return obs[None, ...], np.array([reward]), done, None
 

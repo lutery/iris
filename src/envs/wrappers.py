@@ -11,7 +11,7 @@ from PIL import Image
 
 def make_atari(id, size=64, max_episode_steps=None, noop_max=30, frame_skip=4, done_on_life_loss=False, clip_reward=False):
     env = gym.make(id)
-    assert 'NoFrameskip' in env.spec.id or 'Frameskip' not in env.spec
+    assert 'NoFrameskip' in env.spec.id or 'Frameskip' not in env.spec.id
     env = ResizeObsWrapper(env, (size, size))
     if clip_reward:
         env = RewardClippingWrapper(env)
@@ -64,11 +64,15 @@ class NoopResetEnv(gym.Wrapper):
         if self.override_num_noops is not None:
             noops = self.override_num_noops
         else:
-            noops = self.unwrapped.np_random.randint(1, self.noop_max + 1)
+            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
         assert noops > 0
         obs = None
         for _ in range(noops):
-            obs, _, done, _ = self.env.step(self.noop_action)
+            result = self.env.step(self.noop_action)
+            if len(result) == 4:
+                obs, _, done, _ = result
+            else:  # len(result) == 5
+                obs, _, done, _, _ = result
             if done:
                 obs = self.env.reset(**kwargs)
         return obs
@@ -87,8 +91,13 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.was_real_done = True
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        self.was_real_done = done
+        result = self.env.step(action)
+        if len(result) == 4:
+            obs, reward, done, info = result
+            truncated = False
+        else:  # len(result) == 5
+            obs, reward, done, truncated, info = result
+        self.was_real_done = done or truncated
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
         lives = self.env.unwrapped.ale.lives()
@@ -109,7 +118,11 @@ class EpisodicLifeEnv(gym.Wrapper):
             obs = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
-            obs, _, _, _ = self.env.step(0)
+            result = self.env.step(0)
+            if len(result) == 4:
+                obs, _, _, _ = result
+            else:  # len(result) == 5
+                obs, _, _, _, _ = result
         self.lives = self.env.unwrapped.ale.lives()
         return obs
 
@@ -129,13 +142,18 @@ class MaxAndSkipEnv(gym.Wrapper):
         total_reward = 0.0
         done = None
         for i in range(self._skip):
-            obs, reward, done, info = self.env.step(action)
+            result = self.env.step(action)
+            if len(result) == 4:
+                obs, reward, done, info = result
+                truncated = False
+            else:  # len(result) == 5
+                obs, reward, done, truncated, info = result
             if i == self._skip - 2:
                 self._obs_buffer[0] = obs
             if i == self._skip - 1:
                 self._obs_buffer[1] = obs
             total_reward += reward
-            if done:
+            if done or truncated:
                 break
         # Note that the observation on the done=True frame
         # doesn't matter

@@ -35,10 +35,15 @@ def child_env(child_id: int, env_fn: Callable, child_conn: Connection) -> None:
             obs = env.reset()
             child_conn.send(Message(MessageType.RESET_RETURN, obs))
         elif message_type == MessageType.STEP:
-            obs, rew, done, _ = env.step(content)
-            if done:
+            result = env.step(content)
+            if len(result) == 4:
+                obs, rew, done, _ = result
+                truncated = False
+            else:  # len(result) == 5
+                obs, rew, done, truncated, _ = result
+            if done or truncated:
                 obs = env.reset()
-            child_conn.send(Message(MessageType.STEP_RETURN, (obs, rew, done, None)))
+            child_conn.send(Message(MessageType.STEP_RETURN, (obs, rew, done or truncated, None)))
         elif message_type == MessageType.CLOSE:
             child_conn.close()
             return
