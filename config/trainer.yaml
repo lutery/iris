@@ -7,13 +7,13 @@ defaults:
   - datasets: default
 
 wandb:
-  mode: disabled
-  project: iris
-  entity: null
-  name: null
-  group: null
-  tags: null
-  notes: null
+  mode: disabled # 控制 W&B 的运行模式 含义：disabled 表示不连接 W&B 服务器 使用效果：代码可以运行但不会向 W&B 服务器发送数据 使用场景：本地开发或无需记录时
+  project: iris # 作用：设置项目名称 含义：指定实验记录保存的项目 使用效果：实验数据在 W&B 界面中归类到名为 'iris' 的项目 使用场景：组织多个相关实验
+  entity: null # 作用：设置团队或用户名称 含义：指定项目所属的组织或个人 使用效果：实验归属于特定团队或用户 使用场景：团队协作开发时
+  name: null # 作用：为当前运行指定一个名称 含义：自定义运行实例的显示名称 使用效果：在 W&B 界面中以此名称显示实验 使用场景：需要直观命名实验时
+  group: null # 作用：实验分组 含义：将相关实验归为一组 使用效果：可在 W&B 界面中按组筛选和分析 使用场景：比较相似实验变体时
+  tags: null # 作用：添加标签 含义：为实验添加关键词标签 使用效果：便于在 W&B 界面中过滤和搜索 使用场景：需要快速筛选特定实验时
+  notes: null # 作用：添加实验备注 含义：记录实验的额外说明信息 使用效果：在 W&B 界面中显示详细说明 使用场景：需要记录实验特殊情况或假设时
 
 initialization:
   path_to_checkpoint: null

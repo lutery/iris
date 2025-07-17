@@ -105,11 +105,18 @@ class LossWithIntermediateLosses:
 
 
 class EpisodeDirManager:
+    '''
+    看起来是用来管理训练过程中生成的 episode 的目录，todo 作用
+    '''
     def __init__(self, episode_dir: Path, max_num_episodes: int) -> None:
+        '''
+        episode_dir: 保存 episode 的目录
+        max_num_episodes: 最多保存的 episode 数量，如果超过了则删除最旧的一个
+        '''
         self.episode_dir = episode_dir
         self.episode_dir.mkdir(parents=False, exist_ok=True)
         self.max_num_episodes = max_num_episodes
-        self.best_return = float('-inf')
+        self.best_return = float('-inf') # 最佳 episode 的 return回报，用于判断保存最好回报的模型
 
     def save(self, episode: Episode, episode_id: int, epoch: int) -> None:
         if self.max_num_episodes is not None and self.max_num_episodes > 0:

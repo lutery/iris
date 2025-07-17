@@ -27,11 +27,12 @@ from utils import configure_optimizer, EpisodeDirManager, set_seed
 class Trainer:
     def __init__(self, cfg: DictConfig) -> None:
         wandb.init(
-            config=OmegaConf.to_container(cfg, resolve=True),
-            reinit=True,
-            resume=True,
-            **cfg.wandb
+            config=OmegaConf.to_container(cfg, resolve=True), # 将配置转换为普通字典，并上传到 WandB，记录完整的实验数据，用来作为对比实现
+            reinit=True, # 允许在同一进程中多次初始化 W&B 含义：如果程序重启或重新运行，强制创建新的运行记录 使用效果：每次运行都创建新的实验记录，而不是继续之前的记录 使用场景：单一进程中需要运行多个实验或测试时 注意：已被弃用，建议使用 return_previous 或 finish_previous
+            resume=True, # 恢复之前的运行记录 含义：如果训练中断，可以继续上次的实验记录 使用效果：断点续训时保持实验记录连续性 使用场景：训练中断需要恢复时
+            **cfg.wandb 
         )
+        #
 
         if cfg.common.seed is not None:
             set_seed(cfg.common.seed)
@@ -40,12 +41,14 @@ class Trainer:
         self.start_epoch = 1
         self.device = torch.device(cfg.common.device)
 
-        self.ckpt_dir = Path('checkpoints')
-        self.media_dir = Path('media')
-        self.episode_dir = self.media_dir / 'episodes'
-        self.reconstructions_dir = self.media_dir / 'reconstructions'
+        self.ckpt_dir = Path('checkpoints') # 保存检查点的目录
+        self.media_dir = Path('media') # todo 保存的啥
+        self.episode_dir = self.media_dir / 'episodes' # todo
+        self.reconstructions_dir = self.media_dir / 'reconstructions' # todo
 
         if not cfg.common.resume:
+            # 如果不是继续训练，则进行一系列的初始化，创建系列的目录，保存配置文件等
+            # 便于在 WandB 上查看和对比实验
             config_dir = Path('config')
             config_path = config_dir / 'trainer.yaml'
             config_dir.mkdir(exist_ok=False, parents=False)
@@ -58,14 +61,21 @@ class Trainer:
             self.episode_dir.mkdir(exist_ok=False, parents=False)
             self.reconstructions_dir.mkdir(exist_ok=False, parents=False)
 
+        # 以下EpisodeDirManager应该是用来保存训练和测试过程中模型和最好的模型
         episode_manager_train = EpisodeDirManager(self.episode_dir / 'train', max_num_episodes=cfg.collection.train.num_episodes_to_save)
         episode_manager_test = EpisodeDirManager(self.episode_dir / 'test', max_num_episodes=cfg.collection.test.num_episodes_to_save)
+        # episode_manager_imagination这个可能是用来保存世界模型的，因为iris也是有世界模型，动作策略和想象模型交互
         self.episode_manager_imagination = EpisodeDirManager(self.episode_dir / 'imagination', max_num_episodes=cfg.evaluation.actor_critic.num_episodes_to_save)
 
         def create_env(cfg_env, num_envs):
+            '''
+            cfg_env: 环境的配置
+            num_envs: 环境的数量
+            '''
             env_fn = partial(instantiate, config=cfg_env)
             return MultiProcessEnv(env_fn, num_envs, should_wait_num_envs_ratio=1.0) if num_envs > 1 else SingleProcessEnv(env_fn)
 
+        # 看起来是用来决定当前的训练是否是训练阶段还是测试阶段，两者是分开的，那么可能存在互相覆盖的问题
         if self.cfg.training.should:
             train_env = create_env(cfg.env.train, cfg.collection.train.num_envs)
             self.train_dataset = instantiate(cfg.datasets.train)
