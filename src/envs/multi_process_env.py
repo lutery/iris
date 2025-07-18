@@ -27,13 +27,19 @@ class Message:
 
 
 def child_env(child_id: int, env_fn: Callable, child_conn: Connection) -> None:
+    '''
+    child_id: 0, 1, ..., num_envs - 1 子进程id
+    env_fn: Callable, 返回一个环境实例的函数
+    child_conn: Connection, 子进程与父进程之间通信的管道
+    该函数在子进程中运行，负责接收父进程的指令并执行相应的环境操作后，将观察反馈发送回父进程
+    '''
     np.random.seed(child_id + np.random.randint(0, 2 ** 31 - 1))
     env = env_fn()
     while True:
-        message_type, content = child_conn.recv()
-        if message_type == MessageType.RESET:
+        message_type, content = child_conn.recv() # 接收消息
+        if message_type == MessageType.RESET: # 重置环境
             obs = env.reset()
-            child_conn.send(Message(MessageType.RESET_RETURN, obs))
+            child_conn.send(Message(MessageType.RESET_RETURN, obs)) #
         elif message_type == MessageType.STEP:
             result = env.step(content)
             if len(result) == 4:
@@ -53,12 +59,15 @@ def child_env(child_id: int, env_fn: Callable, child_conn: Connection) -> None:
 
 class MultiProcessEnv(DoneTrackerEnv):
     def __init__(self, env_fn: Callable, num_envs: int, should_wait_num_envs_ratio: float) -> None:
+        '''
+        should_wait_num_envs_ratio: 1.0 todo 作用
+        '''
         super().__init__(num_envs)
         self.num_actions = env_fn().env.action_space.n
         self.should_wait_num_envs_ratio = should_wait_num_envs_ratio
-        self.processes, self.parent_conns = [], []
+        self.processes, self.parent_conns = [], [] # 子进程、父进程之间通信的管道
         for child_id in range(num_envs):
-            parent_conn, child_conn = Pipe()
+            parent_conn, child_conn = Pipe() # 创建一个多进程之间通信的管道，用于父子进程之间的通信
             self.parent_conns.append(parent_conn)
             p = Process(target=child_env, args=(child_id, env_fn, child_conn), daemon=True)
             self.processes.append(p)
