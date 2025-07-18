@@ -77,6 +77,7 @@ class Trainer:
 
         # 看起来是用来决定当前的训练是否是训练阶段还是测试阶段，两者是分开的，那么可能存在互相覆盖的问题
         if self.cfg.training.should:
+            # cfg.env就是指配置中default.yaml中的env部分，可以看到env部分有train和test两个子部分的详细配置
             train_env = create_env(cfg.env.train, cfg.collection.train.num_envs)
             self.train_dataset = instantiate(cfg.datasets.train)
             self.train_collector = Collector(train_env, self.train_dataset, episode_manager_train)

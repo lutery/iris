@@ -1,6 +1,6 @@
 train:
-  _target_: envs.make_atari
-  id: null
+  _target_: envs.make_atari # 这里应该是指明instantiate调用的目标方法的位置，也就是src/envs/make_atari方法
+  id: null # 其他的配置就是和调用的方法参数同名，传给调用的方法
   size: 64
   max_episode_steps: 20000
   noop_max: 30

@@ -3,7 +3,7 @@ defaults:
   - tokenizer: default
   - world_model: default
   - actor_critic: default
-  - env: default
+  - env: default # 使用了hydra进行配置文件管理，这里是设置默认的配置，每个默认配置都在一个独立的目录下，例如此时的 env目录
   - datasets: default
 
 wandb:

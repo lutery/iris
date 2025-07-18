@@ -10,7 +10,16 @@ from PIL import Image
 
 
 def make_atari(id, size=64, max_episode_steps=None, noop_max=30, frame_skip=4, done_on_life_loss=False, clip_reward=False):
-    env = gym.make(id)
+    '''
+    针对不跳帧的游戏
+    将观察缩放至64
+    不进行奖励裁剪
+    限制最大步数是2万步
+    初始化随机无动作
+    多生命拟合为独立的单条生命
+    没有观察灰度、跳帧等常见的 Atari 包装器
+    '''
+    env = gym.make(id) 
     assert 'NoFrameskip' in env.spec.id or 'Frameskip' not in env.spec.id
     env = ResizeObsWrapper(env, (size, size))
     if clip_reward:
