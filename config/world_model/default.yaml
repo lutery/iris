@@ -2,9 +2,9 @@ _target_: models.TransformerConfig
 tokens_per_block: 17
 max_blocks: 20
 attention: 'causal'
-num_layers: 10
-num_heads: 4
-embed_dim: 256
-embed_pdrop: 0.1
-resid_pdrop: 0.1
-attn_pdrop: 0.1
+num_layers: 10 # Transformer的层数
+num_heads: 4 # 注意力头的数量
+embed_dim: 256 # 每个注意力头的嵌入维度
+embed_pdrop: 0.1 # 
+resid_pdrop: 0.1 # 残差连接的dropout率
+attn_pdrop: 0.1 # 注意力dropout率

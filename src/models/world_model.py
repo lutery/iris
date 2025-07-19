@@ -24,17 +24,34 @@ class WorldModelOutput:
 
 class WorldModel(nn.Module):
     def __init__(self, obs_vocab_size: int, act_vocab_size: int, config: TransformerConfig) -> None:
+        '''
+        obs_vocab_size: int, 观察的环境提取的特征维度
+        act_vocab_size: int, 动作的特征维度
+        config: 世界模型的配置参数，TransformerConfig类型
+            _target_: models.TransformerConfig
+            tokens_per_block: 17
+            max_blocks: 20
+            attention: 'causal'
+            num_layers: 10
+            num_heads: 4
+            embed_dim: 256
+            embed_pdrop: 0.1
+            resid_pdrop: 0.1
+            attn_pdrop: 0.1
+        '''
         super().__init__()
         self.obs_vocab_size, self.act_vocab_size = obs_vocab_size, act_vocab_size
         self.config = config
         self.transformer = Transformer(config)
 
-        all_but_last_obs_tokens_pattern = torch.ones(config.tokens_per_block)
+        # todo 以下的作用
+        all_but_last_obs_tokens_pattern = torch.ones(config.tokens_per_block) # 一个shape为17的全1向量，倒数第二个位置为0
         all_but_last_obs_tokens_pattern[-2] = 0
-        act_tokens_pattern = torch.zeros(self.config.tokens_per_block)
-        act_tokens_pattern[-1] = 1
-        obs_tokens_pattern = 1 - act_tokens_pattern
+        act_tokens_pattern = torch.zeros(self.config.tokens_per_block) # 一个shape为17的全零向量
+        act_tokens_pattern[-1] = 1 # 最后一个位置为1
+        obs_tokens_pattern = 1 - act_tokens_pattern # 只有最后一个位置为0，其余位置为1
 
+        # 位置编码器
         self.pos_emb = nn.Embedding(config.max_tokens, config.embed_dim)
 
         self.embedder = Embedder(
@@ -43,6 +60,8 @@ class WorldModel(nn.Module):
             embedding_tables=nn.ModuleList([nn.Embedding(act_vocab_size, config.embed_dim), nn.Embedding(obs_vocab_size, config.embed_dim)])
         )
 
+        # todo 以下三个的作用？
+        # 这里应该是观察头
         self.head_observations = Head(
             max_blocks=config.max_blocks,
             block_mask=all_but_last_obs_tokens_pattern,
@@ -53,6 +72,7 @@ class WorldModel(nn.Module):
             )
         )
 
+        # # 这里应该是奖励头
         self.head_rewards = Head(
             max_blocks=config.max_blocks,
             block_mask=act_tokens_pattern,
@@ -63,6 +83,7 @@ class WorldModel(nn.Module):
             )
         )
 
+        # todo 不明
         self.head_ends = Head(
             max_blocks=config.max_blocks,
             block_mask=act_tokens_pattern,
@@ -73,6 +94,7 @@ class WorldModel(nn.Module):
             )
         )
 
+        # 初始化权重
         self.apply(init_weights)
 
     def __repr__(self) -> str:

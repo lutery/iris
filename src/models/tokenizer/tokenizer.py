@@ -24,6 +24,13 @@ class TokenizerEncoderOutput:
 
 class Tokenizer(nn.Module):
     def __init__(self, vocab_size: int, embed_dim: int, encoder: Encoder, decoder: Decoder, with_lpips: bool = True) -> None:
+        '''
+        参数对应配置文件：tokenizer.yaml
+        看起来有点像观察的特征提取器和反编码器
+
+        看起来就是将观察和特征进行编码特征提取以及反编码为特征图
+        '''
+        
         super().__init__()
         self.vocab_size = vocab_size
         self.encoder = encoder

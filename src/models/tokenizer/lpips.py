@@ -18,14 +18,18 @@ class LPIPS(nn.Module):
     # Learned perceptual metric
     def __init__(self, use_dropout: bool = True):
         super().__init__()
+        # 看起来是一个图像感知相似度度量的网络
         self.scaling_layer = ScalingLayer()
         self.chns = [64, 128, 256, 512, 512]  # vg16 features
+        # 预训练的VGG16网络，可能是用来提取图像特征的
         self.net = vgg16(pretrained=True, requires_grad=False)
+        # todo 以下的作用
         self.lin0 = NetLinLayer(self.chns[0], use_dropout=use_dropout)
         self.lin1 = NetLinLayer(self.chns[1], use_dropout=use_dropout)
         self.lin2 = NetLinLayer(self.chns[2], use_dropout=use_dropout)
         self.lin3 = NetLinLayer(self.chns[3], use_dropout=use_dropout)
         self.lin4 = NetLinLayer(self.chns[4], use_dropout=use_dropout)
+        # 加载已经训练好的vgg_lpips模型
         self.load_from_pretrained()
         for param in self.parameters():
             param.requires_grad = False
@@ -51,12 +55,23 @@ class LPIPS(nn.Module):
 
 
 class ScalingLayer(nn.Module):
+    '''
+    在 IRIS 强化学习算法中的作用主要体现在图像感知相似度度量（LPIPS - Learned Perceptual Image Patch Similarity）
+    感知相似度评估： 在基于模型的强化学习中，ScalingLayer作为LPIPS的组成部分，帮助评估生成图像与目标图像的感知相似度，这比传统的逐像素比较(如MSE)更符合人类视觉感知。
+
+    训练信号优化： 通过标准化预处理，使感知损失能够提供更稳定、一致的训练信号，帮助模型生成更真实的图像预测。
+
+    模型迁移适配： 将输入图像适配到与预训练VGG模型兼容的数据分布，使得强化学习系统能够有效利用迁移学习，借助在大规模数据集上预训练的视觉模型的能力。
+    '''
     def __init__(self) -> None:
         super(ScalingLayer, self).__init__()
         self.register_buffer('shift', torch.Tensor([-.030, -.088, -.188])[None, :, None, None])
         self.register_buffer('scale', torch.Tensor([.458, .448, .450])[None, :, None, None])
 
     def forward(self, inp: torch.Tensor) -> torch.Tensor:
+        '''
+        这段代码对输入图像的RGB通道进行特定的标准化处理，将值映射到预训练VGG网络期望的分布范围内
+        '''
         return (inp - self.shift) / self.scale
 
 

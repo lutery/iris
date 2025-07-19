@@ -17,12 +17,19 @@ from utils import EpisodeDirManager, RandomHeuristic
 
 class Collector:
     def __init__(self, env: Union[SingleProcessEnv, MultiProcessEnv], dataset: EpisodesDataset, episode_dir_manager: EpisodeDirManager) -> None:
+        '''
+        env: 游戏环境实例，SingleProcessEnv或MultiProcessEnv
+        dataset: EpisodesDataset实例，用于存储收集到的观察数据
+        episode_dir_manager: EpisodeDirManager实例，用于管理episode的保存路径
+        该类负责从环境中收集观察数据，并将其存储到dataset中，同时管理episode的保存路径
+        '''
+        
         self.env = env
         self.dataset = dataset
         self.episode_dir_manager = episode_dir_manager
         self.obs = self.env.reset()
-        self.episode_ids = [None] * self.env.num_envs
-        self.heuristic = RandomHeuristic(self.env.num_actions)
+        self.episode_ids = [None] * self.env.num_envs # 存储每一个环境的id吗
+        self.heuristic = RandomHeuristic(self.env.num_actions) # 这个看起来是随机动作选择器
 
     @torch.no_grad()
     def collect(self, agent: Agent, epoch: int, epsilon: float, should_sample: bool, temperature: float, burn_in: int, *, num_steps: Optional[int] = None, num_episodes: Optional[int] = None):

@@ -79,19 +79,27 @@ class Trainer:
         if self.cfg.training.should:
             # cfg.env就是指配置中default.yaml中的env部分，可以看到env部分有train和test两个子部分的详细配置
             train_env = create_env(cfg.env.train, cfg.collection.train.num_envs)
+            # 在次调用hydra的方法根据配置文件创建数据集容器，存储观察数据
             self.train_dataset = instantiate(cfg.datasets.train)
+            # 创建一个Collector实例，用于从环境中收集观察数据，并将其存储到dataset中
             self.train_collector = Collector(train_env, self.train_dataset, episode_manager_train)
 
         if self.cfg.evaluation.should:
+            # 和train同理
             test_env = create_env(cfg.env.test, cfg.collection.test.num_envs)
             self.test_dataset = instantiate(cfg.datasets.test)
             self.test_collector = Collector(test_env, self.test_dataset, episode_manager_test)
 
+        # 至少要有一个训练或测试阶段
         assert self.cfg.training.should or self.cfg.evaluation.should
+        # 这里看起来只能是训练阶段或测试阶段的环境
         env = train_env if self.cfg.training.should else test_env
 
+        #  models.tokenizer.Tokenizer 实例对象
         tokenizer = instantiate(cfg.tokenizer)
+        # 创建世界模型 todo 太多不明白的地方了
         world_model = WorldModel(obs_vocab_size=tokenizer.vocab_size, act_vocab_size=env.num_actions, config=instantiate(cfg.world_model))
+        # 创建动作 评价模型
         actor_critic = ActorCritic(**cfg.actor_critic, act_vocab_size=env.num_actions)
         self.agent = Agent(tokenizer, world_model, actor_critic).to(self.device)
         print(f'{sum(p.numel() for p in self.agent.tokenizer.parameters())} parameters in agent.tokenizer')

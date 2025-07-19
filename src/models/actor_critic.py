@@ -35,6 +35,10 @@ class ImagineOutput:
 
 class ActorCritic(nn.Module):
     def __init__(self, act_vocab_size, use_original_obs: bool = False) -> None:
+        '''
+        act_vocab_size: int, 动作的特征维度
+        use_original_obs: bool, 是否使用原始观察数据，默认为False,对应配置文件actor_critic.yaml
+        '''
         super().__init__()
         self.use_original_obs = use_original_obs
         self.conv1 = nn.Conv2d(3, 32, 3, stride=1, padding=1)
@@ -50,6 +54,7 @@ class ActorCritic(nn.Module):
         self.lstm = nn.LSTMCell(1024, self.lstm_dim)
         self.hx, self.cx = None, None
 
+        # 看起来是共享同一个特征，然后分别计算动作和价值
         self.critic_linear = nn.Linear(512, 1)
         self.actor_linear = nn.Linear(512, act_vocab_size)
 

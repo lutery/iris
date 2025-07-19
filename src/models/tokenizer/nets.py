@@ -11,12 +11,12 @@ import torch.nn as nn
 
 @dataclass
 class EncoderDecoderConfig:
-    resolution: int
-    in_channels: int
-    z_channels: int
-    ch: int
-    ch_mult: List[int]
-    num_res_blocks: int
+    resolution: int # 图像的大小
+    in_channels: int # 通道数
+    z_channels: int # 
+    ch: int # 第一层卷机的通道数
+    ch_mult: List[int] # 用于控制每个残差连接的输入输出通道数的倍率
+    num_res_blocks: int # 有多少个残差连接
     attn_resolutions: List[int]
     out_ch: int
     dropout: float
@@ -24,12 +24,15 @@ class EncoderDecoderConfig:
 
 class Encoder(nn.Module):
     def __init__(self, config: EncoderDecoderConfig) -> None:
+        '''
+        对应配置文件tokenizer
+        '''
         super().__init__()
         self.config = config
-        self.num_resolutions = len(config.ch_mult)
-        temb_ch = 0  # timestep embedding #channels
+        self.num_resolutions = len(config.ch_mult) # todo
+        temb_ch = 0  # timestep embedding #channels # 这个的作用
 
-        # downsampling
+        # downsampling 下采样
         self.conv_in = torch.nn.Conv2d(config.in_channels,
                                        config.ch,
                                        kernel_size=3,
@@ -51,11 +54,15 @@ class Encoder(nn.Module):
                                          dropout=config.dropout))
                 block_in = block_out
                 if curr_res in config.attn_resolutions:
+                    # 如果输出的特征图的尺寸是指定的尺寸，则添加注意力机制
                     attn.append(AttnBlock(block_in))
+            # 下采样层
             down = nn.Module()
             down.block = block
             down.attn = attn
             if i_level != self.num_resolutions - 1:
+                # 如果不是最后一层，则添加下采样层
+                # 下采样的倍率为2
                 down.downsample = Downsample(block_in, with_conv=True)
                 curr_res = curr_res // 2
             self.down.append(down)
@@ -74,6 +81,8 @@ class Encoder(nn.Module):
 
         # end
         self.norm_out = Normalize(block_in)
+        # 最后一层输出z_channels个通道，看起来就是特征图的通道数
+        # 后续也是基于这个做一个随机概率采样吧
         self.conv_out = torch.nn.Conv2d(block_in,
                                         config.z_channels,
                                         kernel_size=3,
@@ -109,6 +118,10 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
+    '''
+    如果没猜错，就是将特征图解码成图像的网络
+    配置复用encoder的
+    '''
     def __init__(self, config: EncoderDecoderConfig) -> None:
         super().__init__()
         self.config = config
@@ -140,7 +153,9 @@ class Decoder(nn.Module):
                                        temb_channels=temb_ch,
                                        dropout=config.dropout)
 
-        # upsampling
+        # upsamplin
+        # 看起来这边的上采样就是增加了一个上采样层，
+        # 其余的就是尺寸不变的特征提取
         self.up = nn.ModuleList()
         for i_level in reversed(range(self.num_resolutions)):
             block = nn.ModuleList()
@@ -163,6 +178,7 @@ class Decoder(nn.Module):
             self.up.insert(0, up)  # prepend to get consistent order
 
         # end
+        # 在这边就转换为3通道
         self.norm_out = Normalize(block_in)
         self.conv_out = torch.nn.Conv2d(block_in,
                                         config.out_ch,
@@ -203,6 +219,22 @@ def nonlinearity(x: torch.Tensor) -> torch.Tensor:
 
 
 def Normalize(in_channels: int) -> nn.Module:
+    '''
+    num_groups：要分成的组数
+    num_channels：输入通道数
+    eps：添加到分母中的小值，防止除零错误
+    affine：如果为True，则添加可学习的仿射变换参数（gamma和beta）
+
+    小批量训练：当GPU内存限制导致只能使用小批量（batch size < 8）时，GroupNorm的表现通常优于BatchNorm
+
+    视觉任务：在计算机视觉任务中表现良好，尤其是图像分类、目标检测和分割
+
+    序列长度不固定的任务：如NLP或视频处理，其中批量内样本长度可变
+
+    对训练/推理一致性有高要求的应用：例如强化学习或增量学习
+
+    高分辨率图像处理：在处理高分辨率图像时，GroupNorm节省内存且效果稳定
+    '''
     return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
 
 
@@ -309,11 +341,14 @@ class ResnetBlock(nn.Module):
 
 
 class AttnBlock(nn.Module):
+    '''
+    todo 后续看注意力层是怎么工作的
+    '''
     def __init__(self, in_channels: int) -> None:
         super().__init__()
         self.in_channels = in_channels
 
-        self.norm = Normalize(in_channels)
+        self.norm = Normalize(in_channels) 
         self.q = torch.nn.Conv2d(in_channels,
                                  in_channels,
                                  kernel_size=1,

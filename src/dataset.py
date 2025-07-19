@@ -14,6 +14,10 @@ Batch = Dict[str, torch.Tensor]
 
 class EpisodesDataset:
     def __init__(self, max_num_episodes: Optional[int] = None, name: Optional[str] = None) -> None:
+        '''
+        max_num_episodes: None or int, None表示不限制最大episode数量,EpisodesDatasetRamMonitoring子类传入的是None
+        name: str, 用于标识数据集的名称，默认为'dataset'
+        '''
         self.max_num_episodes = max_num_episodes
         self.name = name if name is not None else 'dataset'
         self.num_seen_episodes = 0
@@ -119,11 +123,12 @@ class EpisodesDatasetRamMonitoring(EpisodesDataset):
     """
     def __init__(self, max_ram_usage: str, name: Optional[str] = None) -> None:
         super().__init__(max_num_episodes=None, name=name)
-        self.max_ram_usage = max_ram_usage
+        self.max_ram_usage = max_ram_usage # 这个感觉是限制最大内存使用量
         self.num_steps = 0
         self.max_num_steps = None
 
         max_ram_usage = str(max_ram_usage)
+        # 创建一个检查内存使用量的函数，如果超过了返回False，否则返回True
         if max_ram_usage.endswith('%'):
             m = int(max_ram_usage.split('%')[0])
             assert 0 < m < 100
