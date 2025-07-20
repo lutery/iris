@@ -12,6 +12,9 @@ from episode import Episode
 
 
 def configure_optimizer(model, learning_rate, weight_decay, *blacklist_module_names):
+    '''
+    todo 后续可以试试不用这个是否可以训练
+    '''
     """Credits to https://github.com/karpathy/minGPT"""
     # separate out all parameters to those that will and won't experience regularizing weight decay
     decay = set()
@@ -37,10 +40,12 @@ def configure_optimizer(model, learning_rate, weight_decay, *blacklist_module_na
     param_dict = {pn: p for pn, p in model.named_parameters()}
     inter_params = decay & no_decay
     union_params = decay | no_decay
+    # 这里是为了确保没有参数同时出现在 decay 和 no_decay 中
     assert len(inter_params) == 0, f"parameters {str(inter_params)} made it into both decay/no_decay sets!"
     assert len(param_dict.keys() - union_params) == 0, f"parameters {str(param_dict.keys() - union_params)} were not separated into either decay/no_decay set!"
 
     # create the pytorch optimizer object
+    # 这里将 decay 和 no_decay 的参数分开，分别设置不同的 weight_decay
     optim_groups = [
         {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": weight_decay},
         {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
@@ -60,6 +65,13 @@ def init_weights(module):
 
 
 def extract_state_dict(state_dict, module_name):
+    '''
+    根据给定的模块名称提取状态字典中的参数
+    state_dict: 模型的状态字典
+    module_name: 模块的名称，通常是模型的前缀
+    返回一个新的有序字典，其中只包含指定模块的参数
+    这样做的作用就是将存储在一起的模型参数分离出来，便于加载或保存特定模块的参数
+    '''
     return OrderedDict({k.split('.', 1)[1]: v for k, v in state_dict.items() if k.startswith(module_name)})
 
 

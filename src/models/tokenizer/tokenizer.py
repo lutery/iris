@@ -67,10 +67,14 @@ class Tokenizer(nn.Module):
         return LossWithIntermediateLosses(commitment_loss=commitment_loss, reconstruction_loss=reconstruction_loss, perceptual_loss=perceptual_loss)
 
     def encode(self, x: torch.Tensor, should_preprocess: bool = False) -> TokenizerEncoderOutput:
+        '''
+        x: burnin_obs shape is (N, T, C, H, W);
+        shoud_preprocess: 是否需要预处理 True;
+        '''
         if should_preprocess:
             x = self.preprocess_input(x)
-        shape = x.shape  # (..., C, H, W)
-        x = x.view(-1, *shape[-3:])
+        shape = x.shape  # (..., C, H, W) (N, T, C, H, W);
+        x = x.view(-1, *shape[-3:]) # 这里是将 N 和 T 展开成一个维度 shape is (N*T, C, H, W)
         z = self.encoder(x)
         z = self.pre_quant_conv(z)
         b, e, h, w = z.shape
@@ -99,11 +103,20 @@ class Tokenizer(nn.Module):
 
     @torch.no_grad()
     def encode_decode(self, x: torch.Tensor, should_preprocess: bool = False, should_postprocess: bool = False) -> torch.Tensor:
+        '''
+        x: burnin_obs shape is (N, T, C, H, W);
+        shoud_preprocess: 是否需要预处理 True;
+        should_postprocess: 是否需要后处理 True
+        '''
         z_q = self.encode(x, should_preprocess).z_quantized
         return self.decode(z_q, should_postprocess)
 
     def preprocess_input(self, x: torch.Tensor) -> torch.Tensor:
         """x is supposed to be channels first and in [0, 1]"""
+        '''
+        看起来输入的x已经不是0～255之间的了，而是0～1之间的
+        然后将其转换为[-1, 1]之间的张量
+        '''
         return x.mul(2).sub(1)
 
     def postprocess_output(self, y: torch.Tensor) -> torch.Tensor:

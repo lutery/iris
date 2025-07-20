@@ -16,6 +16,10 @@ from tqdm import tqdm
 
 class LPIPS(nn.Module):
     # Learned perceptual metric
+    '''
+    看起来是一个经过特别训练的图像感知相似度度量网络
+    在 IRIS 强化学习算法中的作用主要体现在图像感知相似
+    '''
     def __init__(self, use_dropout: bool = True):
         super().__init__()
         # 看起来是一个图像感知相似度度量的网络
@@ -31,6 +35,7 @@ class LPIPS(nn.Module):
         self.lin4 = NetLinLayer(self.chns[4], use_dropout=use_dropout)
         # 加载已经训练好的vgg_lpips模型
         self.load_from_pretrained()
+        # 本模型不求梯度，不训练
         for param in self.parameters():
             param.requires_grad = False
 
@@ -39,18 +44,26 @@ class LPIPS(nn.Module):
         self.load_state_dict(torch.load(ckpt, map_location=torch.device("cpu")), strict=False)
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # 现对输入和目标图像进行预处理
         in0_input, in1_input = (self.scaling_layer(input), self.scaling_layer(target))
+        # 计算VGG特征
         outs0, outs1 = self.net(in0_input), self.net(in1_input)
         feats0, feats1, diffs = {}, {}, {}
         lins = [self.lin0, self.lin1, self.lin2, self.lin3, self.lin4]
         for kk in range(len(self.chns)):
+            # 对每个特征通道进行处理
             feats0[kk], feats1[kk] = normalize_tensor(outs0[kk]), normalize_tensor(outs1[kk])
+            # 对比input target之间的特征差异
             diffs[kk] = (feats0[kk] - feats1[kk]) ** 2
 
+        # spatial_average 计算最后两个维度的均值
+        # 这里lins是一个包含多个NetLinLayer的列表，每个输出的通道都是1
         res = [spatial_average(lins[kk].model(diffs[kk]), keepdim=True) for kk in range(len(self.chns))]
-        val = res[0]
+        val = res[0] # 这里仅仅只是为了初始化才分开的
         for i in range(1, len(self.chns)):
-            val += res[i]
+            val += res[i] # 这里将所有的特征差异均值进行累加
+        
+        # val shape (B, 1, 1, 1)
         return val
 
 
@@ -87,6 +100,7 @@ class NetLinLayer(nn.Module):
 class vgg16(torch.nn.Module):
     def __init__(self, requires_grad: bool = False, pretrained: bool = True) -> None:
         super(vgg16, self).__init__()
+        # 加载预训练的VGG16模型
         vgg_pretrained_features = models.vgg16(pretrained=pretrained).features
         self.slice1 = torch.nn.Sequential()
         self.slice2 = torch.nn.Sequential()
@@ -94,16 +108,24 @@ class vgg16(torch.nn.Module):
         self.slice4 = torch.nn.Sequential()
         self.slice5 = torch.nn.Sequential()
         self.N_slices = 5
+        '''
+        VGG16 虽然名为"16层"，但这里的16指的是具有权重参数的层数（即卷积层和全连接层），而不是网络中的所有操作层。实际上，VGG16的特征提取部分（features）包含了：
+
+        13个卷积层（带权重）
+        5个最大池化层（无权重）
+        13个ReLU激活函数（无权重）
+        '''
+        # 将预训练的VGG16模型的特征提取部分分成5个切片
         for x in range(4):
-            self.slice1.add_module(str(x), vgg_pretrained_features[x])
+            self.slice1.add_module(str(x), vgg_pretrained_features[x]) # 索引0-3，对应初始的低级特征（边缘和纹理）
         for x in range(4, 9):
-            self.slice2.add_module(str(x), vgg_pretrained_features[x])
+            self.slice2.add_module(str(x), vgg_pretrained_features[x]) # 索引4-8，对应第一个池化层后的特征
         for x in range(9, 16):
-            self.slice3.add_module(str(x), vgg_pretrained_features[x])
+            self.slice3.add_module(str(x), vgg_pretrained_features[x]) # 索引9-15，对应更深层的中级特征
         for x in range(16, 23):
-            self.slice4.add_module(str(x), vgg_pretrained_features[x])
+            self.slice4.add_module(str(x), vgg_pretrained_features[x]) # 对应高级特征
         for x in range(23, 30):
-            self.slice5.add_module(str(x), vgg_pretrained_features[x])
+            self.slice5.add_module(str(x), vgg_pretrained_features[x]) # 对应最深层的特征（语义级特征）
         if not requires_grad:
             for param in self.parameters():
                 param.requires_grad = False
@@ -119,25 +141,29 @@ class vgg16(torch.nn.Module):
         h_relu4_3 = h
         h = self.slice5(h)
         h_relu5_3 = h
+        # 保存每一个部分提取的特征并返回
         vgg_outputs = namedtuple("VggOutputs", ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3', 'relu5_3'])
         out = vgg_outputs(h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_3, h_relu5_3)
         return out
 
 
 def normalize_tensor(x: torch.Tensor, eps: float = 1e-10) -> torch.Tensor:
+    '''
+    函数实现的是一种特征向量的 L2 归一化（也称为"单位向量归一化"或"球面归一化"）
+    '''
     norm_factor = torch.sqrt(torch.sum(x ** 2, dim=1, keepdim=True))
     return x / (norm_factor + eps)
 
 
 def spatial_average(x: torch.Tensor, keepdim: bool = True) -> torch.Tensor:
-    return x.mean([2, 3], keepdim=keepdim)
+    return x.mean([2, 3], keepdim=keepdim) # 保持维度，变化为 B C 1 1
 
 
 # ********************************************************************
 # *************** Utilities to download pretrained vgg ***************
 # ********************************************************************
 
-
+# 如果无法下载则使用同目录下的vgg.pth文件
 URL_MAP = {
     "vgg_lpips": "https://heibox.uni-heidelberg.de/f/607503859c864bc1b30b/?dl=1"
 }

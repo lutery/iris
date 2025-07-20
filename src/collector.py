@@ -33,10 +33,23 @@ class Collector:
 
     @torch.no_grad()
     def collect(self, agent: Agent, epoch: int, epsilon: float, should_sample: bool, temperature: float, burn_in: int, *, num_steps: Optional[int] = None, num_episodes: Optional[int] = None):
+        '''
+        agent: Agent实例，包含策略网络\世界模型等
+        epoch: 当前训练的轮次
+        其余的参数则是配置文件中的参数，即trainer.yaml中collection.train.config
+        epsilon: 0.01
+        should_sample: True
+        temperature: 1.0
+        num_steps: 200
+        burn_in: ${training.actor_critic.burn_in} 配置文件中是20
+        num_episodes：在train中是None，表示不限制收集的episode数量，但是在test中是一个整数，表示收集的episode数量
+        '''
+        
         assert self.env.num_actions == agent.world_model.act_vocab_size
         assert 0 <= epsilon <= 1
 
         assert (num_steps is None) != (num_episodes is None)
+        # 判断是否应该停止收集数据，条件是达到指定的步数或episode数量
         should_stop = lambda steps, episodes: steps >= num_steps if num_steps is not None else episodes >= num_episodes
 
         to_log = []
@@ -46,10 +59,14 @@ class Collector:
 
         burnin_obs_rec, mask_padding = None, None
         if set(self.episode_ids) != {None} and burn_in > 0:
+            # 获取所有环境当前的episode
             current_episodes = [self.dataset.get_episode(episode_id) for episode_id in self.episode_ids]
+            # 从每个episode中截取最后burn_in长度的段落
             segmented_episodes = [episode.segment(start=len(episode) - burn_in, stop=len(episode), should_pad=True) for episode in current_episodes]
+            # 这里将所有的mask_padding和observations堆叠成一个batch
             mask_padding = torch.stack([episode.mask_padding for episode in segmented_episodes], dim=0).to(agent.device)
             burnin_obs = torch.stack([episode.observations for episode in segmented_episodes], dim=0).float().div(255).to(agent.device)
+            # 对环境进行编码，burnin_obs shape is (N, T, C, H, W)
             burnin_obs_rec = torch.clamp(agent.tokenizer.encode_decode(burnin_obs, should_preprocess=True, should_postprocess=True), 0, 1)
 
         agent.actor_critic.reset(n=self.env.num_envs, burnin_observations=burnin_obs_rec, mask_padding=mask_padding)

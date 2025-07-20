@@ -90,13 +90,17 @@ class Encoder(nn.Module):
                                         padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        '''
+        x: shape is (N*T, C, H, W) 观察数据
+        '''
 
         temb = None  # timestep embedding
 
         # downsampling
         hs = [self.conv_in(x)]
-        for i_level in range(self.num_resolutions):
-            for i_block in range(self.config.num_res_blocks):
+        for i_level in range(self.num_resolutions): # 控制进行几次下采样
+            for i_block in range(self.config.num_res_blocks): # 下采样之间特征提取的网络层数
+                # hs[-1] # 上一层的输出 temb： None
                 h = self.down[i_level].block[i_block](hs[-1], temb)
                 if len(self.down[i_level].attn) > 0:
                     h = self.down[i_level].attn[i_block](h)
@@ -318,6 +322,20 @@ class ResnetBlock(nn.Module):
                                                     padding=0)
 
     def forward(self, x: torch.Tensor, temb: torch.Tensor) -> torch.Tensor:
+        '''
+        x: shape is (N*T, C, H, W) 观察数据
+        temb: shape is (N*T, temb_ch) 时间步嵌入 todo 但是目前还未发现有传入的地方，目前默认为None
+
+        假设有传入temb，设计源自生成模型（特别是扩散模型）架构，其中时间步嵌入至关重要。在强化学习上下文中，temb 可以提供以下潜在价值：
+
+        时序条件化：允许模型根据时间位置生成不同的表示，这在序列预测和规划中非常有用
+
+        不确定性建模：在世界模型中，可以表示预测的不确定性随着时间推移的变化
+
+        长期依赖性：帮助模型区分短期和长期记忆中的状态表示
+
+        规划时域：在基于模型的强化学习中，可用于条件化不同时间尺度的规划
+        '''
         h = x
         h = self.norm1(h)
         h = nonlinearity(h)

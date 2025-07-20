@@ -102,18 +102,22 @@ class Trainer:
         # 创建动作 评价模型
         actor_critic = ActorCritic(**cfg.actor_critic, act_vocab_size=env.num_actions)
         self.agent = Agent(tokenizer, world_model, actor_critic).to(self.device)
+        # 打印tokenizer模型、世界模型、动作评价模型参数数量
         print(f'{sum(p.numel() for p in self.agent.tokenizer.parameters())} parameters in agent.tokenizer')
         print(f'{sum(p.numel() for p in self.agent.world_model.parameters())} parameters in agent.world_model')
         print(f'{sum(p.numel() for p in self.agent.actor_critic.parameters())} parameters in agent.actor_critic')
-
+        
+        # 为模型创建优化器
         self.optimizer_tokenizer = torch.optim.Adam(self.agent.tokenizer.parameters(), lr=cfg.training.learning_rate)
         self.optimizer_world_model = configure_optimizer(self.agent.world_model, cfg.training.learning_rate, cfg.training.world_model.weight_decay)
         self.optimizer_actor_critic = torch.optim.Adam(self.agent.actor_critic.parameters(), lr=cfg.training.learning_rate)
 
         if cfg.initialization.path_to_checkpoint is not None:
+            # 加载预训练模型，这里仅包含模型的参数，不包含优化器状态
             self.agent.load(**cfg.initialization, device=self.device)
 
         if cfg.common.resume:
+            # 如果是继续训练，则加载之前的检查点
             self.load_checkpoint()
 
     def run(self) -> None:
@@ -125,6 +129,19 @@ class Trainer:
             to_log = []
 
             if self.cfg.training.should:
+                # 从这里可以看到，如果是训练阶段，则收集数据并训练模型，到了一定的epoch后停止收集数据
+                # 主要是考虑到收集数据的时间开销和成本
+                # 但是也存在以下几个问题：
+                # 虽然这种设计在特定场景中有效，但确实可能存在一些潜在问题：
+                # 分布偏移：如果环境动态变化，或者策略改进导致可达状态分布发生变化，固定的数据集可能不再代表当前策略下的真实分布。
+                # 探索不足：限制环境交互可能导致某些状态空间区域未被充分探索，尤其是那些只有在政策改进后才能到达的区域。
+                # 想象误差累积：依赖世界模型进行长期规划可能导致预测误差累积，如果模型不够准确，这会影响策略优化质量。
+
+                # 优化这些问题的方法：
+                # 适当增加stop_after_epochs的值，确保收集足够多样的数据
+                # 实现周期性数据收集策略，例如每N个epoch重新收集一次数据
+                # 监控模型预测与实际环境之间的差异，当差异超过阈值时恢复数据收集
+                # 实现混合策略，同时使用少量的真实环境交互和大量的模型生成数据
                 if epoch <= self.cfg.collection.train.stop_after_epochs:
                     to_log += self.train_collector.collect(self.agent, epoch, **self.cfg.collection.train.config)
                 to_log += self.train_agent(epoch)
@@ -282,6 +299,14 @@ class Trainer:
         shutil.rmtree(tmp_checkpoint_dir)
 
     def load_checkpoint(self) -> None:
+        '''
+        可持续训练需要保存的参数
+        1. start_epoch
+        2. agent的参数
+        3. optimizer的参数
+        4. train_dataset的状态
+        5. test_dataset的状态（如果有的话）
+        '''
         assert self.ckpt_dir.is_dir()
         self.start_epoch = torch.load(self.ckpt_dir / 'epoch.pt') + 1
         self.agent.load(self.ckpt_dir / 'last.pt', device=self.device)
