@@ -97,9 +97,9 @@ class Encoder(nn.Module):
         temb = None  # timestep embedding
 
         # downsampling
-        hs = [self.conv_in(x)]
+        hs = [self.conv_in(x)] # 存储每一层的输出
         for i_level in range(self.num_resolutions): # 控制进行几次下采样
-            for i_block in range(self.config.num_res_blocks): # 下采样之间特征提取的网络层数
+            for i_block in range(self.config.num_res_blocks): # 下采样之间ResNet层数
                 # hs[-1] # 上一层的输出 temb： None
                 h = self.down[i_level].block[i_block](hs[-1], temb)
                 if len(self.down[i_level].attn) > 0:
