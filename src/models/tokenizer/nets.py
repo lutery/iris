@@ -264,8 +264,19 @@ class Upsample(nn.Module):
                                         padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        '''
+        torch.nn.functional.interpolate(
+                input,                # 输入张量
+                size=None,            # 输出大小
+                scale_factor=None,    # 缩放因子
+                mode='nearest',       # 插值模式
+                align_corners=None,   # 是否对齐角点
+                recompute_scale_factor=None  # 是否重新计算缩放因子
+        '''
+        # todo 换成反卷积试试？进行对比，说是可能造成训练不稳定，生产的图片存在伪影
         x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
         if self.with_conv:
+            # 这里的卷积是为了进一步处理上采样后的特征图，保证生成的特征图更加平滑和一致
             x = self.conv(x)
         return x
 
@@ -284,10 +295,12 @@ class Downsample(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.with_conv:
+            # 使用卷积j卷积进行下采样
             pad = (0, 1, 0, 1)
             x = torch.nn.functional.pad(x, pad, mode="constant", value=0)
             x = self.conv(x)
         else:
+            # 这里使用池话直接下采样
             x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 

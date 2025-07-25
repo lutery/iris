@@ -17,9 +17,9 @@ from utils import LossWithIntermediateLosses
 
 @dataclass
 class TokenizerEncoderOutput:
-    z: torch.FloatTensor
-    z_quantized: torch.FloatTensor
-    tokens: torch.LongTensor
+    z: torch.FloatTensor # 连续潜在表示 shape is (N, T, embed_dim, h(H/4), w(W/4))
+    z_quantized: torch.FloatTensor # 量化潜在表示 通过从码本中查找 `tokens` 对应的向量得到 shape is (N, T, embed_dim, h(H/4), w(W/4))
+    tokens: torch.LongTensor # 通过找到与 `z` 最近的码本项得到 shape is (N, T, H/4*W/4)
 
 
 class Tokenizer(nn.Module):
@@ -102,10 +102,14 @@ class Tokenizer(nn.Module):
         return TokenizerEncoderOutput(z, z_q, tokens)
 
     def decode(self, z_q: torch.Tensor, should_postprocess: bool = False) -> torch.Tensor:
-        shape = z_q.shape  # (..., E, h, w)
-        z_q = z_q.view(-1, *shape[-3:])
-        z_q = self.post_quant_conv(z_q)
-        rec = self.decoder(z_q)
+        '''
+        z_quantized shape is (N, T, embed_dim, h(H/4), w(W/4)) 
+        should_postprocess: 是否需要后处理 在collect中传入的是True
+        '''
+        shape = z_q.shape  # (..., E, h, w) (N, T, embed_dim, h(H/4), w(W/4)) 
+        z_q = z_q.view(-1, *shape[-3:]) # z_q 展平为 (N*T, embed_dim, h(H/4), w(W/4))
+        z_q = self.post_quant_conv(z_q) # 将量化后的向量通过一个1x1卷积转换回原始的z_channels shape is (N*T, z_channels, h(H/4), w(W/4))
+        rec = self.decoder(z_q) # 将量化后的向量解码为重建的图像 shape is (N*T, C, H, W)
         rec = rec.reshape(*shape[:-3], *rec.shape[1:])
         if should_postprocess:
             rec = self.postprocess_output(rec)
@@ -118,7 +122,7 @@ class Tokenizer(nn.Module):
         shoud_preprocess: 是否需要预处理 True;
         should_postprocess: 是否需要后处理 True
         '''
-        z_q = self.encode(x, should_preprocess).z_quantized
+        z_q = self.encode(x, should_preprocess).z_quantized # z_quantized shape is (N, T, embed_dim, h(H/4), w(W/4)) 
         return self.decode(z_q, should_postprocess)
 
     def preprocess_input(self, x: torch.Tensor) -> torch.Tensor:
