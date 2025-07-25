@@ -75,20 +75,30 @@ class Tokenizer(nn.Module):
             x = self.preprocess_input(x)
         shape = x.shape  # (..., C, H, W) (N, T, C, H, W);
         x = x.view(-1, *shape[-3:]) # 这里是将 N 和 T 展开成一个维度 shape is (N*T, C, H, W)
-        z = self.encoder(x)
-        z = self.pre_quant_conv(z)
+        z = self.encoder(x) # z in shape is (N*T, block_in, h(H/4), w(W/4)) | z out shape is h shape is (N*T, z_channels, h(H/4), w(W/4))
+        z = self.pre_quant_conv(z) # z shape is (N*T, embed_dim, h(H/4), w(W/4))
         b, e, h, w = z.shape
-        z_flattened = rearrange(z, 'b e h w -> (b h w) e')
+        z_flattened = rearrange(z, 'b e h w -> (b h w) e') # 将 z 展平为 (b*h*w, e) 的形状，对比view的优势就是不用处理内存是否连续的情况
+        # z_flattened shape is (N*T*H/4*W/4, embed_dim)
+        # self.embedding.weight shape is (vocab_size, embed_dim) todo 怀疑vocab_size=N*T*H/4*W/4 测试
+        # dist_to_embeddings 计算的是计算向量量化(Vector Quantization)中的欧氏距离平方，用于找到编码本(codebook)中与输入向量最相似的项
+        # 计算公式为：||z_flattened||^2 + ||embedding.weight||^2 - 2 * z_flattened @ embedding.weight.t()
         dist_to_embeddings = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + torch.sum(self.embedding.weight**2, dim=1) - 2 * torch.matmul(z_flattened, self.embedding.weight.t())
 
-        tokens = dist_to_embeddings.argmin(dim=-1)
+        # 以上计算完成后：最近邻查找：接下来的 dist_to_embeddings.argmin(dim=-1) 找到最近的码本向量
+        # 离散表示：将连续向量映射到离散空间中的索引（tokens）
+        # 量化：用找到的最近码本向量替换原始向量，创建量化表示
+        tokens = dist_to_embeddings.argmin(dim=-1) # 找到最近的码本向量索引，tokens shape is (N*T*H/4*W/4,)
         z_q = rearrange(self.embedding(tokens), '(b h w) e -> b e h w', b=b, e=e, h=h, w=w).contiguous()
+        # 这里就是根据token找到对应的词嵌入，然后再将其reshape回原来的形状
+        # z_q shape is (N*T, embed_dim, h(H/4), w(W/4))
 
         # Reshape to original
-        z = z.reshape(*shape[:-3], *z.shape[1:])
-        z_q = z_q.reshape(*shape[:-3], *z_q.shape[1:])
-        tokens = tokens.reshape(*shape[:-3], -1)
+        z = z.reshape(*shape[:-3], *z.shape[1:]) # z shape is (N, T, embed_dim, h(H/4), w(W/4))
+        z_q = z_q.reshape(*shape[:-3], *z_q.shape[1:]) # z_q shape is (N, T, embed_dim, h(H/4), w(W/4))
+        tokens = tokens.reshape(*shape[:-3], -1) # tokens shape is (N, T, H/4*W/4)
 
+        # 三者关系查看md文件
         return TokenizerEncoderOutput(z, z_q, tokens)
 
     def decode(self, z_q: torch.Tensor, should_postprocess: bool = False) -> torch.Tensor:

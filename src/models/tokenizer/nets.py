@@ -78,6 +78,7 @@ class Encoder(nn.Module):
                                        out_channels=block_in,
                                        temb_channels=temb_ch,
                                        dropout=config.dropout)
+        
 
         # end
         self.norm_out = Normalize(block_in)
@@ -108,17 +109,26 @@ class Encoder(nn.Module):
             if i_level != self.num_resolutions - 1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
 
-        # middle
-        h = hs[-1]
-        h = self.mid.block_1(h, temb)
+        # middle 
+        h = hs[-1] # 获取最新的一层的输出 h = （N*T, block_in, h(H/4), w(W/4)）
+        h = self.mid.block_1(h, temb) # h shape不变 （N*T, block_in, h(H/4), w(W/4)）
         h = self.mid.attn_1(h)
-        h = self.mid.block_2(h, temb)
+        h = self.mid.block_2(h, temb) # h shape 不变 （N*T, block_in, h(H/4), w(W/4)）
 
         # end
-        h = self.norm_out(h)
-        h = nonlinearity(h)
-        h = self.conv_out(h)
-        return h
+        h = self.norm_out(h) # 进一步归一化
+        h = nonlinearity(h) # 增强数据的拟合能力增强
+        # 高维特征映射（block_in 通道）压缩到较低维度的潜在表示 todo 调试代码的时候看下是否向下压缩的，也就是数据量缩小
+        # 生成潜在表示
+        # 将处理后的特征转换为标准化的潜在空间表示
+        # 这个潜在表示将被用于后续的任务（如重建、分类或策略学习）
+        h = self.conv_out(h) # 后续可能会通过这个参数进行采样，采样后重新生成新的观察
+        '''
+        离散编码：通过 VQ (Vector Quantization) 或 tokenization 进一步处理
+        世界模型输入：作为预测未来状态的世界模型的输入
+        策略学习：为 actor-critic 策略提供观察表示
+        '''
+        return h # h shape is (N*T, z_channels, h(H/4), w(W/4))
 
 
 class Decoder(nn.Module):
@@ -323,7 +333,7 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, temb: torch.Tensor) -> torch.Tensor:
         '''
-        x: shape is (N*T, C, H, W) 观察数据
+        x: shape is (N*T, C, H, W) 观察数据 （N*T, block_in, h(H/4), w(W/4)）
         temb: shape is (N*T, temb_ch) 时间步嵌入 todo 但是目前还未发现有传入的地方，目前默认为None
 
         假设有传入temb，设计源自生成模型（特别是扩散模型）架构，其中时间步嵌入至关重要。在强化学习上下文中，temb 可以提供以下潜在价值：
@@ -389,27 +399,58 @@ class AttnBlock(nn.Module):
                                         padding=0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        '''
+        x:（N*T, block_in, h(H/4), w(W/4)）
+        '''
         h_ = x
-        h_ = self.norm(h_)
-        q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
+        h_ = self.norm(h_) # （N*T, block_in, h(H/4), w(W/4)）
+        q = self.q(h_) # （N*T, block_in, h(H/4), w(W/4)）
+        k = self.k(h_) # （N*T, block_in, h(H/4), w(W/4)）
+        v = self.v(h_) # （N*T, block_in, h(H/4), w(W/4)）
 
         # compute attention
-        b, c, h, w = q.shape
-        q = q.reshape(b, c, h * w)
-        q = q.permute(0, 2, 1)      # b,hw,c
-        k = k.reshape(b, c, h * w)  # b,c,hw
-        w_ = torch.bmm(q, k)        # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
+        b, c, h, w = q.shape # 这里的C已经经过了特征采样，所以这里的C应该有几百个
+        q = q.reshape(b, c, h * w) # q shape is (N*T, block_in, h*H/4*w*W/4)
+        q = q.permute(0, 2, 1)      # b,hw,c | q shape is (N*T, h*H/4*w*W/4, block_in)
+        k = k.reshape(b, c, h * w)  # b,c,hw  | k shape is (N*T, block_in, h*H/4*w*W/4)
+        # 是 PyTorch 中的批量矩阵乘法函数 (Batch Matrix Multiplication)，它对批次中的矩阵对执行矩阵乘法运算
+        '''
+        数学表达式：
+
+        输入：两个 3D 张量 A 和 B，形状分别为 (b, n, m) 和 (b, m, p)
+        输出：形状为 (b, n, p) 的张量 C，其中 C[i] = A[i] @ B[i]（@ 表示矩阵乘法）
+
+        数学上，每个批次中，w_[b,i,j] 计算了位置 i 对位置 j 的注意力得分，通过计算 i 处的查询向量与 j 处的键向量的点积。
+        '''
+        w_ = torch.bmm(q, k)        # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j] | w shape is (N*T, h*H/4*w*W/4, h*H/4*w*W/4)
+        # 查询-键相似度的缩放
+        '''
+        当特征维度 c 较大时，点积的方差也会增大。在没有缩放的情况下：
+
+        方差 = O(c)
+        这会导致 softmax 函数在高维度时产生极端的概率分布（接近 one-hot）
+
+        缩放的目的是将方差稳定在 O(1)，使梯度更加稳定
+        '''
         w_ = w_ * (int(c) ** (-0.5))
+        # 产生每一个位置的注意力分数（这里用概率模拟）
         w_ = torch.nn.functional.softmax(w_, dim=2)
 
         # attend to values
-        v = v.reshape(b, c, h * w)
-        w_ = w_.permute(0, 2, 1)   # b,hw,hw (first hw of k, second of q)
-        h_ = torch.bmm(v, w_)     # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
-        h_ = h_.reshape(b, c, h, w)
+        v = v.reshape(b, c, h * w) # v shape is (N*T, block_in, h*H/4*w*W/4)
+        w_ = w_.permute(0, 2, 1)   # b,hw,hw (first hw of k, second of q) | w_ shape is (N*T, h*H/4*w*W/4, h*H/4*w*W/4)
+        h_ = torch.bmm(v, w_)     # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j] | h shape is (N*T, block_in, h*H/4*w*W/4) 
+        # 根据每个概率计算每一个位置的大小，将应该被忽略的变小，将要重视的变大
+        h_ = h_.reshape(b, c, h, w) # h_ shape is (N*T, block_in, h(H/4), w(W/4))
 
-        h_ = self.proj_out(h_)
+        # 特征混合：融合各位置之间的注意力加权信息
+        # 特征稳定：防止注意力机制引入过大的特征变化
+        # 归一化控制：保持特征量级在合理范围    内
+        h_ = self.proj_out(h_) # h_ shape is (N*T, block_in, h(H/4), w(W/4))    
 
+        # 在进行残差连接之前，proj_out 确保注意力机制的输出与输入特征在同一特征空间，使残差连接有效
+        # 防止特征崩塌：没有 proj_out，注意力机制可能导致特征分布过于集中
+        # 可学习的特征混合：允许模型学习如何最佳地组合注意力输出
+        # 增加模型容量：提供额外的参数来捕获复杂的特征关系
+        # 残差路径稳定：确保残差连接两端的特征分布兼容
         return x + h_
