@@ -35,4 +35,5 @@ class DoneTrackerEnv:
     @property
     def mask_new_dones(self) -> np.ndarray:
         # self.done_tracker[self.done_tracker <= 1]：表示哪些环境是新结束的或者未结束
+        # 使用logical_not将未结束设置为True，结束的设置为False的矩阵
         return np.logical_not(self.done_tracker[self.done_tracker <= 1])

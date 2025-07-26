@@ -153,6 +153,9 @@ class EpisodeDirManager:
 
 
 class RandomHeuristic:
+    '''
+    随机动作采样器
+    '''
     def __init__(self, num_actions):
         self.num_actions = num_actions
 

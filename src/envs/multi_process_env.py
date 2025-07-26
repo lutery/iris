@@ -75,6 +75,9 @@ class MultiProcessEnv(DoneTrackerEnv):
             p.start()
 
     def should_reset(self) -> bool:
+        # 如果当前已经结束的环境数量大于等于应该等待的环境数量比例，则返回True
+        # 否则返回False，在当前的默认配置中，should_wait_num_envs_ratio=1.0
+        # 即所有环境都结束了才会重置
         return (self.num_envs_done / self.num_envs) >= self.should_wait_num_envs_ratio
 
     def _receive(self, check_type: Optional[MessageType] = None) -> List[Any]:
@@ -91,10 +94,13 @@ class MultiProcessEnv(DoneTrackerEnv):
         return np.stack(content)
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any]:
+        # 给每一个子进程发送动作
         for parent_conn, action in zip(self.parent_conns, actions):
             parent_conn.send(Message(MessageType.STEP, action))
+        # 接收每个子进程的返回结果
         content = self._receive(check_type=MessageType.STEP_RETURN)
         obs, rew, done, _ = zip(*content)
+        # 用结束标识更新done_tracker
         done = np.stack(done)
         self.update_done_tracker(done)
         return np.stack(obs), np.stack(rew), done, None

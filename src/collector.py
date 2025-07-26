@@ -55,6 +55,7 @@ class Collector:
         to_log = []
         steps, episodes = 0, 0
         returns = []
+        # 存储收集到的观察数据，动作，奖励和结束标识
         observations, actions, rewards, dones = [], [], [], []
 
         burnin_obs_rec, mask_padding = None, None # burnin_obs_rec存储对观察进行编码重建后的结果，mask_padding是padding的mask ｜ mask_padding存储的是从环境中截取后不足的长度补充的填充
@@ -70,24 +71,37 @@ class Collector:
             burnin_obs_rec = torch.clamp(agent.tokenizer.encode_decode(burnin_obs, should_preprocess=True, should_postprocess=True), 0, 1)
 
         agent.actor_critic.reset(n=self.env.num_envs, burnin_observations=burnin_obs_rec, mask_padding=mask_padding)
+        # 有指定步数就按步数收集数据，否则按episode数量收集数据
         pbar = tqdm(total=num_steps if num_steps is not None else num_episodes, desc=f'Experience collection ({self.dataset.name})', file=sys.stdout)
 
         while not should_stop(steps, episodes):
-
+            
+            # self.obs存储当前的obs
             observations.append(self.obs)
+            # 在这里将obs转换为0～1之间的浮点数，通道数为3，大小为64x64
             obs = rearrange(torch.FloatTensor(self.obs).div(255), 'n h w c -> n c h w').to(agent.device)
+            # act shape is (N, 1)
             act = agent.act(obs, should_sample=should_sample, temperature=temperature).cpu().numpy()
 
             if random.random() < epsilon:
+                # 如果随机数小于epsilon，则使用随机动作采样器
                 act = self.heuristic.act(obs).cpu().numpy()
 
+            # 执行动作，的到下一个观察，奖励和结束标识，并存储起来
+            # 看起来存储区域是按照当前的观察，当前观察下的动作，奖励和结束标识来存储的
             self.obs, reward, done, _ = self.env.step(act)
 
             actions.append(act)
             rewards.append(reward)
             dones.append(done)
 
+            # 获取返回未结束或者新结束的环境数量，用来更新进度条
+            # 因为是并行环境，如果一个环境已经结束了，那么执行的step是无效的
+            # 属于无效步数，不需要统计更新
+            # 如果是新结束的，那么导致结束执行的那一步是有效的，是需要进行统计的
+            # 这里是为什么要区分新结束或者已结束的原因
             new_steps = len(self.env.mask_new_dones)
+            # 更新进度条
             steps += new_steps
             pbar.update(new_steps if num_steps is not None else 0)
 
@@ -96,6 +110,9 @@ class Collector:
             # Not a problem with a SingleProcessEnv.
 
             if self.env.should_reset():
+                # 如果已经结束的环境数量大于等于应该等待的环境数量比例，则重置环境
+
+                # 首先将收集到的观察，动作，奖励和结束标识添加到数据集中
                 self.add_experience_to_dataset(observations, actions, rewards, dones)
 
                 new_episodes = self.env.num_envs

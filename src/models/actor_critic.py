@@ -19,8 +19,8 @@ from utils import compute_lambda_returns, LossWithIntermediateLosses
 
 @dataclass
 class ActorCriticOutput:
-    logits_actions: torch.FloatTensor
-    means_values: torch.FloatTensor
+    logits_actions: torch.FloatTensor # 预测的动作预测 logits_actions shape is (N, 1, act_vocab_size)
+    means_values: torch.FloatTensor # 预测的评价均值 means_values shape is (N, 1, 1)
 
 
 @dataclass
@@ -69,12 +69,15 @@ class ActorCritic(nn.Module):
         n: 环境的数量
         bernin_observations: 重建后的环境观察obs shape (N, T, C, H, W)
         mask_padding: 对于采样的观察不足长度的掩码位 shape （N, T,)
+
+        reset 并不返回任何预测结果，那么reset应该仅仅只是用来重制
+        ActorCritic 的状态位 hx 和 cx
         '''
         
         device = self.conv1.weight.device
-        # 以下两个应该是用在lstm中的状态位
-        self.hx = torch.zeros(n, self.lstm_dim, device=device)
-        self.cx = torch.zeros(n, self.lstm_dim, device=device)
+        # 以下两个应该是用在lstm中的状态位,初始为0
+        self.hx = torch.zeros(n, self.lstm_dim, device=device) # (N, lstm_dim)
+        self.cx = torch.zeros(n, self.lstm_dim, device=device) # (N, lstm_dim)
         if burnin_observations is not None:
             # burnin_observations.ndim == 5 代表此时观察必须是 (N, T, C, H, W)
             # burnin_observations.size(0) == n 代表N 和环境的数量需要一致，也就是每个环境采样一次
@@ -97,23 +100,45 @@ class ActorCritic(nn.Module):
         mask_padding: shape is (N,)
         '''
         
-        assert inputs.ndim == 4 and inputs.shape[1:] == (3, 64, 64)
-        assert 0 <= inputs.min() <= 1 and 0 <= inputs.max() <= 1
+        assert inputs.ndim == 4 and inputs.shape[1:] == (3, 64, 64) # 判断维度是否是 N C H W, 并且H和W都是64
+        assert 0 <= inputs.min() <= 1 and 0 <= inputs.max() <= 1 # 确认是否在[0, 1]之间
+        # 要么不传mask_padding，要么mask_padding.ndim == 1，且mask_padding.size(0) == inputs.size(0)，且mask_padding至少有一个True（表明至少有一个N是有包含有效的观察数据）
         assert mask_padding is None or (mask_padding.ndim == 1 and mask_padding.size(0) == inputs.size(0) and mask_padding.any())
+        # 将存在有效数据的观察选择出来
         x = inputs[mask_padding] if mask_padding is not None else inputs
 
-        x = x.mul(2).sub(1)
-        x = F.relu(self.maxp1(self.conv1(x)))
-        x = F.relu(self.maxp2(self.conv2(x)))
-        x = F.relu(self.maxp3(self.conv3(x)))
-        x = F.relu(self.maxp4(self.conv4(x)))
-        x = torch.flatten(x, start_dim=1)
+        x = x.mul(2).sub(1)  # 将输入数据从[0, 1]范围转换到[-1, 1]范围
+        x = F.relu(self.maxp1(self.conv1(x))) # （N, C, H, W） -> （N, C, H/2, W/2）
+        x = F.relu(self.maxp2(self.conv2(x))) # （N, C, H/2, W/2） -> （N, C, H/4, W/4）
+        x = F.relu(self.maxp3(self.conv3(x))) # （N, C, H/4, W/4） -> （N, C, H/8, W/8）
+        x = F.relu(self.maxp4(self.conv4(x))) # （N, C, H/8, W/8） -> （N, C, H/16, W/16）
+        x = torch.flatten(x, start_dim=1) # 将特征展平，变为（N, C*H/16*W/16）
 
         if mask_padding is None:
+            # 如果传入None， 则代表没有mask_padding，直接使用全部数据
             self.hx, self.cx = self.lstm(x, (self.hx, self.cx))
         else:
+            # 如果有mask_padding，则只对mask_padding为True的部分进行LSTM计算
+            # 通过(self.hx[mask_padding], self.cx[mask_padding])提取有效数据进行计算
             self.hx[mask_padding], self.cx[mask_padding] = self.lstm(x, (self.hx[mask_padding], self.cx[mask_padding]))
+        
+        # self.hx shape is (N, lstm_dim)
+        # self.cx shape is (N, lstm_dim)
+        '''
+        self.hx - 隐藏状态 (hidden state)
 
+        包含 LSTM 单元当前时间步的输出
+        作为当前时刻的特征表示，直接用于后续的动作和价值预测
+        self.cx - 单元状态 (cell state)
+
+        LSTM 的内部记忆，负责长期信息的传递
+        通过门控机制来选择性地保留或忘记信息
+        '''
+
+        # self.actor_linear(self.hx) shape is (N, act_vocab_size)
+        # self.critic_linear(self.hx) shape is (N, 1)
+        # logits_actions shape is (N, 1, act_vocab_size)
+        # means_values shape is (N, 1, 1)
         logits_actions = rearrange(self.actor_linear(self.hx), 'b a -> b 1 a')
         means_values = rearrange(self.critic_linear(self.hx), 'b 1 -> b 1 1')
 
