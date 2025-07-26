@@ -65,14 +65,26 @@ class ActorCritic(nn.Module):
         self.hx, self.cx = None, None
 
     def reset(self, n: int, burnin_observations: Optional[torch.Tensor] = None, mask_padding: Optional[torch.Tensor] = None) -> None:
+        '''
+        n: 环境的数量
+        bernin_observations: 重建后的环境观察obs shape (N, T, C, H, W)
+        mask_padding: 对于采样的观察不足长度的掩码位 shape （N, T,)
+        '''
+        
         device = self.conv1.weight.device
+        # 以下两个应该是用在lstm中的状态位
         self.hx = torch.zeros(n, self.lstm_dim, device=device)
         self.cx = torch.zeros(n, self.lstm_dim, device=device)
         if burnin_observations is not None:
+            # burnin_observations.ndim == 5 代表此时观察必须是 (N, T, C, H, W)
+            # burnin_observations.size(0) == n 代表N 和环境的数量需要一致，也就是每个环境采样一次
+            # mask_padding is not None 就算没有填充也要传入对应的值，即0
+            # burnin_observations.shape[:2] == mask_padding.shape 代表 两者的前两个维度都是NT，mask_padding可能后续会自动扩散进行两者合并
             assert burnin_observations.ndim == 5 and burnin_observations.size(0) == n and mask_padding is not None and burnin_observations.shape[:2] == mask_padding.shape
-            for i in range(burnin_observations.size(1)):
-                if mask_padding[:, i].any():
+            for i in range(burnin_observations.size(1)): # 遍历每个时间步上的数据
+                if mask_padding[:, i].any(): # 这里表示如果mask_padding有任何时间步有有效数据，都要进行一次编码；如果都没有那么久不要进行编码了
                     with torch.no_grad():
+                        # 对每一个时间步的环境观察和掩码填充传入给自身
                         self(burnin_observations[:, i], mask_padding[:, i])
 
     def prune(self, mask: np.ndarray) -> None:
@@ -80,6 +92,11 @@ class ActorCritic(nn.Module):
         self.cx = self.cx[mask]
 
     def forward(self, inputs: torch.FloatTensor, mask_padding: Optional[torch.BoolTensor] = None) -> ActorCriticOutput:
+        '''
+        inputs: shape is (N, C, H, W)
+        mask_padding: shape is (N,)
+        '''
+        
         assert inputs.ndim == 4 and inputs.shape[1:] == (3, 64, 64)
         assert 0 <= inputs.min() <= 1 and 0 <= inputs.max() <= 1
         assert mask_padding is None or (mask_padding.ndim == 1 and mask_padding.size(0) == inputs.size(0) and mask_padding.any())

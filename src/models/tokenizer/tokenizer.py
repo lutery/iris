@@ -110,9 +110,9 @@ class Tokenizer(nn.Module):
         z_q = z_q.view(-1, *shape[-3:]) # z_q 展平为 (N*T, embed_dim, h(H/4), w(W/4))
         z_q = self.post_quant_conv(z_q) # 将量化后的向量通过一个1x1卷积转换回原始的z_channels shape is (N*T, z_channels, h(H/4), w(W/4))
         rec = self.decoder(z_q) # 将量化后的向量解码为重建的图像 shape is (N*T, C, H, W)
-        rec = rec.reshape(*shape[:-3], *rec.shape[1:])
+        rec = rec.reshape(*shape[:-3], *rec.shape[1:]) # rec shape is (N, T, C, H, W)
         if should_postprocess:
-            rec = self.postprocess_output(rec)
+            rec = self.postprocess_output(rec) # 将[-1, 1]之间的张量转换为[0, 1]之间的张量
         return rec
 
     @torch.no_grad()
@@ -135,4 +135,5 @@ class Tokenizer(nn.Module):
 
     def postprocess_output(self, y: torch.Tensor) -> torch.Tensor:
         """y is supposed to be channels first and in [-1, 1]"""
+        # 这里是将[-1, 1]之间的张量转换为[0, 1]之间的张量，应该是为了后续转换为0～255之间的张量
         return y.add(1).div(2)

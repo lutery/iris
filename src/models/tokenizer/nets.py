@@ -135,6 +135,7 @@ class Decoder(nn.Module):
     '''
     如果没猜错，就是将特征图解码成图像的网络
     配置复用encoder的
+    这里也要注意的是，这里面的已有的模型结构仅支持指定分辨率的上采样为64
     '''
     def __init__(self, config: EncoderDecoderConfig) -> None:
         super().__init__()
@@ -224,6 +225,7 @@ class Decoder(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
+        # h = (N*T, out_ch, H, W)  # 输出的图像形状
         return h
 
 
@@ -300,7 +302,7 @@ class Downsample(nn.Module):
             x = torch.nn.functional.pad(x, pad, mode="constant", value=0)
             x = self.conv(x)
         else:
-            # 这里使用池话直接下采样
+            # 这里使用池化直接下采样
             x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 

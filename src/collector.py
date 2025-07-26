@@ -57,7 +57,7 @@ class Collector:
         returns = []
         observations, actions, rewards, dones = [], [], [], []
 
-        burnin_obs_rec, mask_padding = None, None
+        burnin_obs_rec, mask_padding = None, None # burnin_obs_rec存储对观察进行编码重建后的结果，mask_padding是padding的mask ｜ mask_padding存储的是从环境中截取后不足的长度补充的填充
         if set(self.episode_ids) != {None} and burn_in > 0:
             # 获取所有环境当前的episode
             current_episodes = [self.dataset.get_episode(episode_id) for episode_id in self.episode_ids]
@@ -66,7 +66,7 @@ class Collector:
             # 这里将所有的mask_padding和observations堆叠成一个batch
             mask_padding = torch.stack([episode.mask_padding for episode in segmented_episodes], dim=0).to(agent.device)
             burnin_obs = torch.stack([episode.observations for episode in segmented_episodes], dim=0).float().div(255).to(agent.device)
-            # 对环境进行编码，burnin_obs shape is (N, T, C, H, W)
+            # 对环境进行编码重建，得到重建后的观察，burnin_obs shape is (N, T, C, H, W) 
             burnin_obs_rec = torch.clamp(agent.tokenizer.encode_decode(burnin_obs, should_preprocess=True, should_postprocess=True), 0, 1)
 
         agent.actor_critic.reset(n=self.env.num_envs, burnin_observations=burnin_obs_rec, mask_padding=mask_padding)
