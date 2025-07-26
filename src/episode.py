@@ -7,8 +7,8 @@ import torch
 
 @dataclass
 class EpisodeMetrics:
-    episode_length: int
-    episode_return: float
+    episode_length: int # 生命周期的长度，也就是收集到的观察数据的数量
+    episode_return: float # 生命周期的回报，也就是收集到的奖励的总和
 
 
 @dataclass

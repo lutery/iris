@@ -78,6 +78,7 @@ class MultiProcessEnv(DoneTrackerEnv):
         # 如果当前已经结束的环境数量大于等于应该等待的环境数量比例，则返回True
         # 否则返回False，在当前的默认配置中，should_wait_num_envs_ratio=1.0
         # 即所有环境都结束了才会重置
+        # 这里self.num_envs_done判断每个环境是否曾经结束过一次
         return (self.num_envs_done / self.num_envs) >= self.should_wait_num_envs_ratio
 
     def _receive(self, check_type: Optional[MessageType] = None) -> List[Any]:

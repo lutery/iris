@@ -4,6 +4,8 @@ import numpy as np
 class DoneTrackerEnv:
     '''
     跟踪每个环境的完成状态的环境基类。
+    更正一下，这里的2不是已经结束了，而是曾经经历过一次结束状体的环境表示标识，用来判断
+    是否需要结束本轮的数据收集，填充到缓冲区中
     '''
 
     def __init__(self, num_envs: int) -> None:

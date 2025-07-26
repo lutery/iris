@@ -1,7 +1,7 @@
 import random
 from typing import List, Optional, Union
 
-import gym
+import gymnasium as gym
 from einops import rearrange
 import numpy as np
 from PIL import Image

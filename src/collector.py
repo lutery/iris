@@ -28,7 +28,7 @@ class Collector:
         self.dataset = dataset
         self.episode_dir_manager = episode_dir_manager
         self.obs = self.env.reset()
-        self.episode_ids = [None] * self.env.num_envs # 存储每一个环境的id吗
+        self.episode_ids = [None] * self.env.num_envs # 存储每一个环境的对应在dataset缓冲区的最新的episode id，可以用这个id来找到对应的Episode实例
         self.heuristic = RandomHeuristic(self.env.num_actions) # 这个看起来是随机动作选择器
 
     @torch.no_grad()
@@ -52,9 +52,9 @@ class Collector:
         # 判断是否应该停止收集数据，条件是达到指定的步数或episode数量
         should_stop = lambda steps, episodes: steps >= num_steps if num_steps is not None else episodes >= num_episodes
 
-        to_log = []
-        steps, episodes = 0, 0
-        returns = []
+        to_log = [] # 存储收集的数据中的指标信息，后续会将这些指标信息记录到wandb中
+        steps, episodes = 0, 0 # 存储已经收集的环境步数，存储已经收集的生命周期的数量
+        returns = [] # 存储每个episode的回报，也就是收集到的奖励的总和
         # 存储收集到的观察数据，动作，奖励和结束标识
         observations, actions, rewards, dones = [], [], [], []
 
@@ -89,6 +89,7 @@ class Collector:
 
             # 执行动作，的到下一个观察，奖励和结束标识，并存储起来
             # 看起来存储区域是按照当前的观察，当前观察下的动作，奖励和结束标识来存储的
+            # 在不断的step中，会自动根据是否结束来重置环境
             self.obs, reward, done, _ = self.env.step(act)
 
             actions.append(act)
@@ -100,6 +101,7 @@ class Collector:
             # 属于无效步数，不需要统计更新
             # 如果是新结束的，那么导致结束执行的那一步是有效的，是需要进行统计的
             # 这里是为什么要区分新结束或者已结束的原因
+            # 根据以上的逻辑，在收集数据时，一般都是有效的，因为会自动重制环境，所以基本都是新结束或者未结束的
             new_steps = len(self.env.mask_new_dones)
             # 更新进度条
             steps += new_steps
@@ -116,25 +118,27 @@ class Collector:
                 self.add_experience_to_dataset(observations, actions, rewards, dones)
 
                 new_episodes = self.env.num_envs
-                episodes += new_episodes
+                episodes += new_episodes # 更新已经收集的episode数量
                 pbar.update(new_episodes if num_episodes is not None else 0)
 
                 for episode_id in self.episode_ids:
-                    episode = self.dataset.get_episode(episode_id)
-                    self.episode_dir_manager.save(episode, episode_id, epoch)
+                    episode = self.dataset.get_episode(episode_id) # 获取对应id存储的episode数据
+                    self.episode_dir_manager.save(episode, episode_id, epoch) # 保存episode数据到指定路径
                     metrics_episode = {k: v for k, v in episode.compute_metrics().__dict__.items()}
                     metrics_episode['episode_num'] = episode_id
+                    # 统计该周期内动作的选择倾向，是指向同一个动作还是分布均匀
                     metrics_episode['action_histogram'] = wandb.Histogram(np_histogram=np.histogram(episode.actions.numpy(), bins=np.arange(0, self.env.num_actions + 1) - 0.5, density=True))
                     to_log.append({f'{self.dataset.name}/{k}': v for k, v in metrics_episode.items()})
                     returns.append(metrics_episode['episode_return'])
 
-                self.obs = self.env.reset()
-                self.episode_ids = [None] * self.env.num_envs
-                agent.actor_critic.reset(n=self.env.num_envs)
-                observations, actions, rewards, dones = [], [], [], []
+                self.obs = self.env.reset() # 重置环境，获取新的观察数据
+                self.episode_ids = [None] * self.env.num_envs # 重置episode_ids为None，表示当前没有收集到数据
+                agent.actor_critic.reset(n=self.env.num_envs) # 重置actor_critic的状态
+                observations, actions, rewards, dones = [], [], [], [] # 清空收集到的观察，动作，奖励和结束标识
 
         # Add incomplete episodes to dataset, and complete them later.
         if len(observations) > 0:
+            # 将最后收集到的观察，动作，奖励和结束标识添加到数据集中
             self.add_experience_to_dataset(observations, actions, rewards, dones)
 
         agent.actor_critic.clear()
@@ -152,7 +156,10 @@ class Collector:
 
     def add_experience_to_dataset(self, observations: List[np.ndarray], actions: List[np.ndarray], rewards: List[np.ndarray], dones: List[np.ndarray]) -> None:
         assert len(observations) == len(actions) == len(rewards) == len(dones)
+        # 这里将T N转换为N T的形式，即将时间步和环境数量进行交换,因为在收集数据时都是按照时间的维度填充到 list中
         for i, (o, a, r, d) in enumerate(zip(*map(lambda arr: np.swapaxes(arr, 0, 1), [observations, actions, rewards, dones]))):  # Make everything (N, T, ...) instead of (T, N, ...)
+            # 遍历每一个环境的完整时间步的环境观察、动作，奖励和结束标识
+            # todo 后续判断这里是存储一个完整的生命周期还是存储着一个完整生命周期以及多个生命周期的片段
             episode = Episode(
                 observations=torch.ByteTensor(o).permute(0, 3, 1, 2).contiguous(),  # channel-first
                 actions=torch.LongTensor(a),
@@ -161,6 +168,8 @@ class Collector:
                 mask_padding=torch.ones(d.shape[0], dtype=torch.bool),
             )
             if self.episode_ids[i] is None:
+                # 如果对应的环境没有存储过数据，那么就新增
                 self.episode_ids[i] = self.dataset.add_episode(episode)
             else:
+                # 如果对应的环境已经存储过数据，那么就更新，将收集到的数据和之前已经存储的数据继续拼接起来
                 self.dataset.update_episode(self.episode_ids[i], episode)

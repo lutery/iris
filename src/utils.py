@@ -128,27 +128,39 @@ class EpisodeDirManager:
         self.episode_dir = episode_dir
         self.episode_dir.mkdir(parents=False, exist_ok=True)
         self.max_num_episodes = max_num_episodes
-        self.best_return = float('-inf') # 最佳 episode 的 return回报，用于判断保存最好回报的模型
+        self.best_return = float('-inf') # 最佳 episode 的 return回报，用于判断保存最好回报的Episode
 
     def save(self, episode: Episode, episode_id: int, epoch: int) -> None:
         if self.max_num_episodes is not None and self.max_num_episodes > 0:
             self._save(episode, episode_id, epoch)
 
     def _save(self, episode: Episode, episode_id: int, epoch: int) -> None:
+        '''
+        episode: 需要保存的 Episode 对象，里面包含多个收集的观察数据，包含多伦的数据
+        episode_id: 该 episode 的 ID
+        epoch: 该 episode 的训练轮数
+        '''
+        # 检查当前目录下的 episode 数量，如果超过了最大数量，则删除最旧的一个
         ep_paths = [p for p in self.episode_dir.iterdir() if p.stem.startswith('episode_')]
         assert len(ep_paths) <= self.max_num_episodes
         if len(ep_paths) == self.max_num_episodes:
             to_remove = min(ep_paths, key=lambda ep_path: int(ep_path.stem.split('_')[1]))
             to_remove.unlink()
+        # 保存当前 episode
         episode.save(self.episode_dir / f'episode_{episode_id}_epoch_{epoch}.pt')
 
         ep_return = episode.compute_metrics().episode_return
         if ep_return > self.best_return:
+            # 如果当前 episode 的回报超过了最佳回报，则保存为最佳 episode
             self.best_return = ep_return
+            # 删除之前保存的最佳 episode
+            # 这里的逻辑是，如果之前已经保存过最佳 episode，则删除之前的
+            # 否则就不删除，因为第一次保存最佳 episode 时没有之前的
             path_best_ep = [p for p in self.episode_dir.iterdir() if p.stem.startswith('best_')]
             assert len(path_best_ep) in (0, 1)
             if len(path_best_ep) == 1:
                 path_best_ep[0].unlink()
+            # 保存当前 episode 为最佳 episode
             episode.save(self.episode_dir / f'best_episode_{episode_id}_epoch_{epoch}.pt')
 
 

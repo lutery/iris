@@ -4,7 +4,7 @@ Credits to https://github.com/openai/baselines/blob/master/baselines/common/atar
 
 from typing import Tuple
 
-import gym
+import gymnasium as gym
 import numpy as np
 from PIL import Image
 
@@ -19,7 +19,7 @@ def make_atari(id, size=64, max_episode_steps=None, noop_max=30, frame_skip=4, d
     多生命拟合为独立的单条生命
     没有观察灰度、跳帧等常见的 Atari 包装器
     '''
-    env = gym.make(id) 
+    env = gym.make('ALE/Kangaroo-v5')
     assert 'NoFrameskip' in env.spec.id or 'Frameskip' not in env.spec.id
     env = ResizeObsWrapper(env, (size, size))
     if clip_reward:
