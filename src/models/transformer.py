@@ -61,6 +61,10 @@ class Transformer(nn.Module):
         return KeysValues(n, self.config.num_heads, max_tokens, self.config.embed_dim, self.config.num_layers, device)
 
     def forward(self, sequences: torch.Tensor, past_keys_values: Optional[KeysValues] = None) -> torch.Tensor:
+        '''
+        sequences: shape is (N, T(H/4*W/4+1), embed_dim)，包含了观察token和动作的信息
+        past_keys_values: Optional[KeysValues]，如果是训练world_model时传入的是None
+        '''
         assert past_keys_values is None or len(past_keys_values) == len(self.blocks)
         x = self.drop(sequences)
         for i, block in enumerate(self.blocks):
@@ -98,6 +102,10 @@ class Block(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, past_keys_values: Optional[KeysValues] = None) -> torch.Tensor:
+        '''
+        x: shape is (N, T(H/4*W/4+1), embed_dim)，包含了观察token和动作的信息
+        past_keys_values: Optional[KeysValues]，如果是训练world_model时传入的是None todo 这里的参数应该是KVCache类型
+        '''
         x_attn = self.attn(self.ln1(x), past_keys_values)
         x = x + x_attn
         x = x + self.mlp(self.ln2(x))
@@ -137,28 +145,78 @@ class SelfAttention(nn.Module):
         self.register_buffer('mask', causal_mask if config.attention == 'causal' else block_causal_mask)
 
     def forward(self, x: torch.Tensor, kv_cache: Optional[KVCache] = None) -> torch.Tensor:
-        B, T, C = x.size()
+        '''
+        x: shape is (N, T(H/4*W/4+1), embed_dim)，包含了观察token和动作的信息
+        kv_cache: 如果是训练world_model时传入的是None
+        '''
+        B, T, C = x.size() # (N, T(H/4*W/4+1), embed_dim)
         if kv_cache is not None:
+            # todo 啥时候传入的不是None
+            # 应该是在推理时缓存，用于增量解码，支持生成时的高效推理，避免重复计算历史tokens的K、V
             b, nh, L, c = kv_cache.shape
             assert nh == self.num_heads and b == B and c * nh == C
         else:
-            L = 0
+            L = 0 # 表示之前缓存的长度
 
-        q = self.query(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)   # (B, nh, T, hs)
-        k = self.key(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)     # (B, nh, T, hs)
-        v = self.value(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)   # (B, nh, T, hs)
+        # self.query(x) shape is (N, T(H/4*W/4+1), embed_dim)
+        # view(B, T, num_heads, C // num_heads) shape is (N, T(H/4*W/4+1), num_heads, embed_dim // num_heads)
+        # transpose(1, 2) shape is (N, num_heads, T(H/4*W/4+1), embed_dim // num_heads)
+        # 最终q, k, v的shape都是 (N, num_heads, T(H/4*W/4+1), embed_dim // num_heads)
+        q = self.query(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2) 
+        k = self.key(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)    
+        v = self.value(x).view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)   
 
         if kv_cache is not None:
+            # todo 啥时候不是None
+            # 训练时跳过（kv_cache=None）
+            # 推理时将新的K、V添加到缓存中，获取完整的K、V序列
             kv_cache.update(k, v)
             k, v = kv_cache.get()
 
+        # k.transpose(-2, -1) shape is (N, num_heads, embed_dim // num_heads, T(H/4*W/4+1))
+        # q @ k.transpose(-2, -1) shape is (N, num_heads, T(H/4*W/4+1), T(H/4*W/4+1))
+        # 计算每个query与所有key的相似度分数
+        # 缩放因子：1/√d_k 防止点积值过大，确保softmax输出平滑
+        # att[b,h,i,j] 表示第b个样本、第h个头中，位置i对位置j的注意力原始分数
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        '''
+        原理：
+
+        Causal Mask：下三角矩阵，确保位置i只能看到位置≤i的信息
+        Block Causal Mask：块对角结构，允许块内全连接，块间因果
+        作用：
+
+        防止信息泄露（未来信息不能影响当前决策）
+        在IRIS中确保世界模型的时序一致性
+        todo 重新多看看transformer的代码
+        '''
         att = att.masked_fill(self.mask[L:L + T, :L + T] == 0, float('-inf'))
+        # Softmax：将注意力分数转换为概率分布
+        # 数学意义：att[b,h,i,j] 现在表示位置i对位置j的注意力权重，每行和为1
         att = F.softmax(att, dim=-1)
+        # Dropout：训练时随机置零部分注意力连接，防止过拟合
         att = self.attn_drop(att)
+        # att shape is (N, num_heads, T(H/4*W/4+1), T(H/4*W/4+1))
+        # v shape is (N, num_heads, T(H/4*W/4+1), embed_dim // num_heads)
+        # 最终y shape is (N, T(H/4*W/4+1), embed_dim)
+        # 计算注意力输出：每个位置的表示是所有位置的值的加权平均
+        # att @ v shape is (N, num_heads, T(H/4*W/4+1), embed_dim // num_heads)
+        # 将注意力权重应用于值向量，得到每个位置的加权表示
         y = att @ v
+        # y shape is (N, T(H/4*W/4+1), embed_dim)
+        # 将多个注意力头的输出拼接回原始嵌入维度 作用：整合不同头学到的特征表示
         y = rearrange(y, 'b h t e -> b t (h e)')
 
+        '''
+        原理：
+
+        线性投影：将拼接后的特征映射回输出空间
+        Dropout：正则化防止过拟合
+        意义：
+
+        允许模型学习如何组合多头注意力的信息
+        为后续的残差连接准备输出
+        '''
         y = self.resid_drop(self.proj(y))
 
         return y

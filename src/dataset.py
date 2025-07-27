@@ -82,28 +82,64 @@ class EpisodesDataset:
         return episode_id
 
     def sample_batch(self, batch_num_samples: int, sequence_length: int, sample_from_start: bool = True) -> Batch:
+        '''
+        采样一个batch的episode片段。
+        batch_num_samples: int, 每个batch的样本数量
+        sequence_length: int, 采样的序列长度
+        sample_from_start: bool, 是否从episode的开始位置采样片段，默认为True
+
+        return 返回了一个以'observations', 'actions', 'rewards'等为键的字典，每个键对应的值是一个tensor，包含了所有采样片段的对应数据。
+        observations shape (batch_num_samples, sequence_length, channels, height, width)
+        actions shape (batch_num_samples, sequence_length, action_dim)
+        rewards shape (batch_num_samples, sequence_length)
+        dones shape (batch_num_samples, sequence_length)
+        '''
+
         return self._collate_episodes_segments(self._sample_episodes_segments(batch_num_samples, sequence_length, sample_from_start))
 
     def _sample_episodes_segments(self, batch_num_samples: int, sequence_length: int, sample_from_start: bool) -> List[Episode]:
+        '''
+        采样一个batch的episode片段。
+        batch_num_samples: int, 每个batch的样本数量
+        sequence_length: int, 采样的连续序列长度
+        sample_from_start: bool, 是否从episode的开始位置采样片段，默认为True
+
+        return 返回采样得到的batch_num_samples个长度为sequence_length的episode片段列表
+        '''
+        
+        # 从episodes中随机采样batch_num_samples个episode
         sampled_episodes = random.choices(self.episodes, k=batch_num_samples)
-        sampled_episodes_segments = []
+        sampled_episodes_segments = [] # 保存采样得到的序列
         for sampled_episode in sampled_episodes:
+            # sample_from_start = true 则从episode的开始位置采样，否则从随机位置采样（去除头部和尾部）
+            # start和stop是采样的起始和结束位置
             if sample_from_start:
                 start = random.randint(0, len(sampled_episode) - 1)
                 stop = start + sequence_length
             else:
                 stop = random.randint(1, len(sampled_episode))
                 start = stop - sequence_length
+            # 确保采样的片段长度为sequence_length
             sampled_episodes_segments.append(sampled_episode.segment(start, stop, should_pad=True))
-            assert len(sampled_episodes_segments[-1]) == sequence_length
+            assert len(sampled_episodes_segments[-1]) == sequence_length # 确保采样的片段长度为sequence_length
         return sampled_episodes_segments
 
     def _collate_episodes_segments(self, episodes_segments: List[Episode]) -> Batch:
+        '''
+        episodes_segments: List[Episode], 采样得到的episode片段列表
+
+        return 返回了一个以'observations', 'actions', 'rewards'等为键的字典，每个键对应的值是一个tensor，包含了所有采样片段的对应数据。
+        observations shape (batch_num_samples, sequence_length, channels, height, width)
+        actions shape (batch_num_samples, sequence_length, action_dim)
+        rewards shape (batch_num_samples, sequence_length)
+        dones shape (batch_num_samples, sequence_length)
+        '''
+        # __dict__是将Episode对象转换为字典形式，方便后续处理
         episodes_segments = [e_s.__dict__ for e_s in episodes_segments]
         batch = {}
-        for k in episodes_segments[0]:
-            batch[k] = torch.stack([e_s[k] for e_s in episodes_segments])
-        batch['observations'] = batch['observations'].float() / 255.0  # int8 to float and scale
+        for k in episodes_segments[0]: # 这里的k是Episode对象的属性名/dict的键值，比如'observations', 'actions', 'rewards'等
+            batch[k] = torch.stack([e_s[k] for e_s in episodes_segments]) # 将每个episode片段的k属性值都拼接堆叠成一个tensor
+        batch['observations'] = batch['observations'].float() / 255.0  # int8 to float and scale # 0-255 to 0-1
         return batch
 
     def traverse(self, batch_num_samples: int, chunk_size: int):

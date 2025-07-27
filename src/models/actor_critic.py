@@ -70,7 +70,7 @@ class ActorCritic(nn.Module):
         bernin_observations: 重建后的环境观察obs shape (N, T, C, H, W)
         mask_padding: 对于采样的观察不足长度的掩码位 shape （N, T,)
 
-        reset 并不返回任何预测结果，那么reset应该仅仅只是用来重制
+        reset 并不返回任何预测结果，那么reset应该仅仅只是用来重置
         ActorCritic 的状态位 hx 和 cx
         '''
         

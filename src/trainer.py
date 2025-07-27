@@ -143,6 +143,8 @@ class Trainer:
                 # 监控模型预测与实际环境之间的差异，当差异超过阈值时恢复数据收集
                 # 实现混合策略，同时使用少量的真实环境交互和大量的模型生成数据
                 if epoch <= self.cfg.collection.train.stop_after_epochs:
+                    # 采样数据，每次采样前，都会从上一次断开的地方开始，同时为了避免lstm过长，都会
+                    # 清理actor critic中的状态，在每次collect进入时在重新构建
                     to_log += self.train_collector.collect(self.agent, epoch, **self.cfg.collection.train.config)
                 to_log += self.train_agent(epoch)
 
@@ -166,6 +168,7 @@ class Trainer:
 
         metrics_tokenizer, metrics_world_model, metrics_actor_critic = {}, {}, {}
 
+        # 从trainer.yaml中获取对应的配置信息
         cfg_tokenizer = self.cfg.training.tokenizer
         cfg_world_model = self.cfg.training.world_model
         cfg_actor_critic = self.cfg.training.actor_critic
@@ -185,18 +188,37 @@ class Trainer:
         return [{'epoch': epoch, **metrics_tokenizer, **metrics_world_model, **metrics_actor_critic}]
 
     def train_component(self, component: nn.Module, optimizer: torch.optim.Optimizer, steps_per_epoch: int, batch_num_samples: int, grad_acc_steps: int, max_grad_norm: Optional[float], sequence_length: int, sample_from_start: bool, **kwargs_loss: Any) -> Dict[str, float]:
-        loss_total_epoch = 0.0
-        intermediate_losses = defaultdict(float)
+        '''
+        component: 待训练的模型
+        optimizer: 优化器
+        steps_per_epoch: 每个epoch的训练步数
+        batch_num_samples: 每个batch的样本数量
+        grad_acc_steps: 梯度累积步数 作用：控制只有累计到一定的梯度后才会进行一次优化步骤
+        max_grad_norm: 梯度裁剪的最大范数
+        sequence_length: 序列长度 todo
+        sample_from_start: 是否从序列开始采样 self.agent.tokenizer和self.agent.world_model为true，self.agent.actor_critic为False todo 为啥
+        kwargs_loss: 其他损失函数的参数
+        '''
+        
+        loss_total_epoch = 0.0 # 存储本次训练的总损失
+        intermediate_losses = defaultdict(float) # 这个应该是用来存储中间损失的字典，key为损失名称，value为损失值，用于记录每个损失的平均值
 
         for _ in tqdm(range(steps_per_epoch), desc=f"Training {str(component)}", file=sys.stdout):
             optimizer.zero_grad()
             for _ in range(grad_acc_steps):
+                '''
+                batch 返回了一个以'observations', 'actions', 'rewards'等为键的字典，每个键对应的值是一个tensor，包含了所有采样片段的对应数据。
+                observations shape (batch_num_samples, sequence_length, channels, height, width)
+                actions shape (batch_num_samples, sequence_length, action_dim)
+                rewards shape (batch_num_samples, sequence_length)
+                dones shape (batch_num_samples, sequence_length)
+                '''
                 batch = self.train_dataset.sample_batch(batch_num_samples, sequence_length, sample_from_start)
                 batch = self._to_device(batch)
 
-                losses = component.compute_loss(batch, **kwargs_loss) / grad_acc_steps
-                loss_total_step = losses.loss_total
-                loss_total_step.backward()
+                losses = component.compute_loss(batch, **kwargs_loss) / grad_acc_steps # 计算损失并进行梯度累积，因为要累积梯度，那么就要除以 grad_acc_steps，防止梯度过大，平衡不同梯度之间的比例
+                loss_total_step = losses.loss_total # 获取本次的总损失
+                loss_total_step.backward() # 反向传播计算梯度
                 loss_total_epoch += loss_total_step.item() / steps_per_epoch
 
                 for loss_name, loss_value in losses.intermediate_losses.items():

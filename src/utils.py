@@ -106,12 +106,16 @@ def compute_lambda_returns(rewards, values, ends, gamma, lambda_):
 
 class LossWithIntermediateLosses:
     def __init__(self, **kwargs):
-        self.loss_total = sum(kwargs.values())
-        self.intermediate_losses = {k: v.item() for k, v in kwargs.items()}
+        self.loss_total = sum(kwargs.values()) # 总损失是所有损失的和
+        self.intermediate_losses = {k: v.item() for k, v in kwargs.items()} # 中间损失是一个字典，包含每个损失的名称和数值
 
     def __truediv__(self, value):
+        '''
+        在该类中实现了除法操作，允许将损失除以一个值，被调用
+        这里传入的value是一个数值，通常是批次大小或累积的批次数
+        '''
         for k, v in self.intermediate_losses.items():
-            self.intermediate_losses[k] = v / value
+            self.intermediate_losses[k] = v / value  # 将每个中间损失除以value，用于后续的累积梯度的计算
         self.loss_total = self.loss_total / value
         return self
 

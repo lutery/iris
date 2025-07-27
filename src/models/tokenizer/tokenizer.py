@@ -19,7 +19,7 @@ from utils import LossWithIntermediateLosses
 class TokenizerEncoderOutput:
     z: torch.FloatTensor # 连续潜在表示 shape is (N, T, embed_dim, h(H/4), w(W/4))
     z_quantized: torch.FloatTensor # 量化潜在表示 通过从码本中查找 `tokens` 对应的向量得到 shape is (N, T, embed_dim, h(H/4), w(W/4))
-    tokens: torch.LongTensor # 通过找到与 `z` 最近的码本项得到 shape is (N, T, H/4*W/4)
+    tokens: torch.LongTensor # 通过找到与 `z` 最近的码本项得到索引 shape is (N, T, H/4*W/4)
 
 
 class Tokenizer(nn.Module):
@@ -45,20 +45,44 @@ class Tokenizer(nn.Module):
         return "tokenizer"
 
     def forward(self, x: torch.Tensor, should_preprocess: bool = False, should_postprocess: bool = False) -> Tuple[torch.Tensor]:
+        '''
+        x: 观察数据，shape is (N * T, C, H, W)，范围在-1～1之间
+        should_preprocess: 是否需要预处理，默认为False
+        should_postprocess: 是否需要后处理，默认为False
+
+        returen 返回一个包含三个元素的元组：
+        - z: 连续潜在表示，shape is (N, T, embed_dim, h(H/4), w(W/4))
+        - z_quantized: 量化潜在表示，shape is (N, T, embed_dim, h(H/4), w(W/4))
+        - reconstructions: 重建的图像，shape is (N, T, C, H, W)
+        '''
         outputs = self.encode(x, should_preprocess)
-        decoder_input = outputs.z + (outputs.z_quantized - outputs.z).detach()
+        # 下面的计算具体的含义查看md文件
+        decoder_input = outputs.z + (outputs.z_quantized - outputs.z).detach() # 实际使用离散后的z分布区重建图像，在计算梯度时，训练的连续分布的z相关的网络，那么应该是促进网络能够提取关键的信息
         reconstructions = self.decode(decoder_input, should_postprocess)
         return outputs.z, outputs.z_quantized, reconstructions
 
     def compute_loss(self, batch: Batch, **kwargs: Any) -> LossWithIntermediateLosses:
+        '''
+        batch 返回了一个以'observations', 'actions', 'rewards'等为键的字典，每个键对应的值是一个tensor，包含了所有采样片段的对应数据。
+        observations shape (batch_num_samples, sequence_length, channels, height, width) 此时已经是0～1之间的浮点数了
+        actions shape (batch_num_samples, sequence_length, action_dim)
+        rewards shape (batch_num_samples, sequence_length)
+        dones shape (batch_num_samples, sequence_length)
+        '''
         assert self.lpips is not None
-        observations = self.preprocess_input(rearrange(batch['observations'], 'b t c h w -> (b t) c h w'))
+        # rearrange(batch['observations'], 'b t c h w -> (b t) c h w')： 将batch['observations']的形状从 (batch_num_samples, sequence_length, channels, height, width) 转换为 (batch_num_samples * sequence_length, channels, height, width)
+        observations = self.preprocess_input(rearrange(batch['observations'], 'b t c h w -> (b t) c h w')) # 转换为[-1, 1]之间的张量
         z, z_quantized, reconstructions = self(observations, should_preprocess=False, should_postprocess=False)
+        # z shape is (N*T, embed_dim, h(H/4), w(W/4))
+        # z_quantized shape is (N*T, embed_dim, h(H/4), w(W/4))
+        # reconstructions shape is (N*T, C, H, W)
 
         # Codebook loss. Notes:
         # - beta position is different from taming and identical to original VQVAE paper
-        # - VQVAE uses 0.25 by default
+        # - VQVAE uses 0.25 by default 损失来自于 VQ-VAE (Vector Quantized Variational AutoEncoder) 的原始论文
         beta = 1.0
+        # 以下具体看md
+        # z 表示连续潜在表示，z_quantized 表示量化后的潜在表示，z可以学习到提取到的比较重要的特征，所以应该是z_quantized的值更接近z
         commitment_loss = (z.detach() - z_quantized).pow(2).mean() + beta * (z - z_quantized.detach()).pow(2).mean()
 
         reconstruction_loss = torch.abs(observations - reconstructions).mean()

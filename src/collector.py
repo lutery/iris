@@ -60,9 +60,9 @@ class Collector:
 
         burnin_obs_rec, mask_padding = None, None # burnin_obs_rec存储对观察进行编码重建后的结果，mask_padding是padding的mask ｜ mask_padding存储的是从环境中截取后不足的长度补充的填充
         if set(self.episode_ids) != {None} and burn_in > 0:
-            # 获取所有环境当前的episode
+            # 获取所有环境在dataset中最新的episode
             current_episodes = [self.dataset.get_episode(episode_id) for episode_id in self.episode_ids]
-            # 从每个episode中截取最后burn_in长度的段落
+            # 从每个episode中截取最后burn_in长度的段落，避免lstm过长导致状态传递存在问题
             segmented_episodes = [episode.segment(start=len(episode) - burn_in, stop=len(episode), should_pad=True) for episode in current_episodes]
             # 这里将所有的mask_padding和observations堆叠成一个batch
             mask_padding = torch.stack([episode.mask_padding for episode in segmented_episodes], dim=0).to(agent.device)
@@ -70,6 +70,9 @@ class Collector:
             # 对环境进行编码重建，得到重建后的观察，burnin_obs shape is (N, T, C, H, W) 
             burnin_obs_rec = torch.clamp(agent.tokenizer.encode_decode(burnin_obs, should_preprocess=True, should_postprocess=True), 0, 1)
 
+        # 提取上一次collect退出时最新的环境状态，重建actor_critic的状态，保证lstm的中状体的连续性
+        # 这样在后续中由于self.obs不是从reset中开始的，而是从上一次collect中结束的状态开始的
+        # 同时如果上一次不是从reset结束的话，那么本次开始收集的数据都会继续添加到上一次退出的episode中
         agent.actor_critic.reset(n=self.env.num_envs, burnin_observations=burnin_obs_rec, mask_padding=mask_padding)
         # 有指定步数就按步数收集数据，否则按episode数量收集数据
         pbar = tqdm(total=num_steps if num_steps is not None else num_episodes, desc=f'Experience collection ({self.dataset.name})', file=sys.stdout)
@@ -141,6 +144,7 @@ class Collector:
             # 将最后收集到的观察，动作，奖励和结束标识添加到数据集中
             self.add_experience_to_dataset(observations, actions, rewards, dones)
 
+        # 完成一次收集后，清理动作策略网络的内部状态
         agent.actor_critic.clear()
 
         metrics_collect = {
