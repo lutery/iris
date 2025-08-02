@@ -195,7 +195,7 @@ class Trainer:
         batch_num_samples: 每个batch的样本数量
         grad_acc_steps: 梯度累积步数 作用：控制只有累计到一定的梯度后才会进行一次优化步骤
         max_grad_norm: 梯度裁剪的最大范数
-        sequence_length: 序列长度 todo
+        sequence_length: 序列长度 todo 在训练ac模型是等于1 + self.cfg.training.actor_critic.burn_in
         sample_from_start: 是否从序列开始采样 self.agent.tokenizer和self.agent.world_model为true，self.agent.actor_critic为False todo 为啥
         kwargs_loss: 其他损失函数的参数
         '''

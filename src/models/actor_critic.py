@@ -145,6 +145,15 @@ class ActorCritic(nn.Module):
         return ActorCriticOutput(logits_actions, means_values)
 
     def compute_loss(self, batch: Batch, tokenizer: Tokenizer, world_model: WorldModel, imagine_horizon: int, gamma: float, lambda_: float, entropy_weight: float, **kwargs: Any) -> LossWithIntermediateLosses:
+        '''
+        batch:
+        observations shape (batch_num_samples, 1 + burn_in, channels, height, width)
+        actions shape (batch_num_samples, 1 + burn_in, action_dim)
+        rewards shape (batch_num_samples, 1 + burn_in)
+        dones shape (batch_num_samples, 1 + burn_in)
+        imagine_horizon: int, 想象的时间步数，对应配置文件中world_model中的max_block
+        '''
+        
         assert not self.use_original_obs
         outputs = self.imagine(batch, tokenizer, world_model, horizon=imagine_horizon)
 
@@ -168,11 +177,18 @@ class ActorCritic(nn.Module):
         return LossWithIntermediateLosses(loss_actions=loss_actions, loss_values=loss_values, loss_entropy=loss_entropy)
 
     def imagine(self, batch: Batch, tokenizer: Tokenizer, world_model: WorldModel, horizon: int, show_pbar: bool = False) -> ImagineOutput:
+        '''
+        batch:
+        observations shape (batch_num_samples, 1 + burn_in, channels, height, width)
+        actions shape (batch_num_samples, 1 + burn_in, action_dim)
+        rewards shape (batch_num_samples, 1 + burn_in)
+        dones shape (batch_num_samples, 1 + burn_in)
+        '''
         assert not self.use_original_obs
         initial_observations = batch['observations']
         mask_padding = batch['mask_padding']
         assert initial_observations.ndim == 5 and initial_observations.shape[2:] == (3, 64, 64)
-        assert mask_padding[:, -1].all()
+        assert mask_padding[:, -1].all() # 至少要有有效数据
         device = initial_observations.device
         wm_env = WorldModelEnv(tokenizer, world_model, device)
 
@@ -183,17 +199,19 @@ class ActorCritic(nn.Module):
         all_ends = []
         all_observations = []
 
+        # burnin_observations shape is (B, T-1, C, H, W)
         burnin_observations = torch.clamp(tokenizer.encode_decode(initial_observations[:, :-1], should_preprocess=True, should_postprocess=True), 0, 1) if initial_observations.size(1) > 1 else None
         self.reset(n=initial_observations.size(0), burnin_observations=burnin_observations, mask_padding=mask_padding[:, :-1])
 
-        obs = wm_env.reset_from_initial_observations(initial_observations[:, -1])
+        # initial_observations[:, -1] # shape is (B, C, H, W), 代表最后一个时间步的观察数据
+        obs = wm_env.reset_from_initial_observations(initial_observations[:, -1]) # 返回重建后的观察数据，shape is (B, C, H, W)
         for k in tqdm(range(horizon), disable=not show_pbar, desc='Imagination', file=sys.stdout):
 
             all_observations.append(obs)
 
             outputs_ac = self(obs)
-            action_token = Categorical(logits=outputs_ac.logits_actions).sample()
-            obs, reward, done, _ = wm_env.step(action_token, should_predict_next_obs=(k < horizon - 1))
+            action_token = Categorical(logits=outputs_ac.logits_actions).sample() # 对预测的动作进行采样
+            obs, reward, done, _ = wm_env.step(action_token, should_predict_next_obs=(k < horizon - 1)) # 执行动作
 
             all_actions.append(action_token)
             all_logits_actions.append(outputs_ac.logits_actions)

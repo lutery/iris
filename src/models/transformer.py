@@ -57,6 +57,11 @@ class Transformer(nn.Module):
         self.ln_f = nn.LayerNorm(config.embed_dim)
 
     def generate_empty_keys_values(self, n: int, max_tokens: int) -> KeysValues:
+        '''
+        n: batch size
+        max_tokens: 最大的tokens数量，来自world_model的配置参数
+        用于创建空的键值缓存（KV Cache）
+        '''
         device = self.ln_f.weight.device  # Assumption that all submodules are on the same device
         return KeysValues(n, self.config.num_heads, max_tokens, self.config.embed_dim, self.config.num_layers, device)
 

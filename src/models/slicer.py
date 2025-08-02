@@ -44,8 +44,20 @@ class Head(Slicer):
         self.head_module = head_module
 
     def forward(self, x: torch.Tensor, num_steps: int, prev_steps: int) -> torch.Tensor:
-        x_sliced = x[:, self.compute_slice(num_steps, prev_steps)]  # x is (B, T, E)
+        '''
+        x shape (N, T(H/4*W/4+1), embed_dim) 包含了观察和动作的信息进一步提取的特征
+        num_steps: T(H/4*W/4+1)，tokens的维度
+        prev_steps: 在训练world_model时传入的是0
+        '''
+        # self.compute_slice(num_steps, prev_steps)会根据block_mask中掩码不为0的位置计算出需要保留的索引位置
+        x_sliced = x[:, self.compute_slice(num_steps, prev_steps)] 
+        # 在head_observations中，x_sliced shape is (N, T(H/4*W/4+1 - 1), embed_dim)，因为去除了最后一个观察token
+        # 在head_rewards中，x_sliced shape is (N, T(1), embed_dim），因为去仅保留最后一个动作token
+        # 在head_ends中，x_sliced shape is (N, T(1), embed_dim)，因为去仅保留最后一个动作token
         return self.head_module(x_sliced)
+        # 在head_observations中，x_sliced shape is (N, T(H/4*W/4+1 - 1), obs_vocab_size)
+        # 在head_rewards中，x_sliced shape is (N, T(1), 3)，因为去仅保留最后一个动作token
+        # 在head_ends中，x_sliced shape is (N, T(1), 2)，因为去仅保留最后一个动作token
 
 
 class Embedder(nn.Module):
