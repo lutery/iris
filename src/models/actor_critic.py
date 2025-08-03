@@ -164,13 +164,13 @@ class ActorCritic(nn.Module):
                 ends=outputs.ends,
                 gamma=gamma,
                 lambda_=lambda_,
-            )[:, :-1]
+            )[:, :-1] # 去掉了最后一个时间步的lambda returns todo 为啥？
 
-        values = outputs.values[:, :-1]
+        values = outputs.values[:, :-1] # 去掉了最后一个时间步的值函数 todo 为啥？
 
-        d = Categorical(logits=outputs.logits_actions[:, :-1])
-        log_probs = d.log_prob(outputs.actions[:, :-1])
-        loss_actions = -1 * (log_probs * (lambda_returns - values.detach())).mean()
+        d = Categorical(logits=outputs.logits_actions[:, :-1]) # 也是去掉了最后一个时间步的动作预测 logits_actions
+        log_probs = d.log_prob(outputs.actions[:, :-1]) # 根据实际执行的动作计算对应的log概率
+        loss_actions = -1 * (log_probs * (lambda_returns - values.detach())).mean() # 也是一样，如果实际的计算回报更高，那么要加大log_prob；如果实际的计算回报更低，那么要减小log_prob
         loss_entropy = - entropy_weight * d.entropy().mean()
         loss_values = F.mse_loss(values, lambda_returns)
 

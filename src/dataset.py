@@ -143,10 +143,18 @@ class EpisodesDataset:
         return batch
 
     def traverse(self, batch_num_samples: int, chunk_size: int):
+        '''
+        batch_num_samples: int, 每个batch的样本数量
+        chunk_size: int, 每个chunk的大小，表示每个episode片段的长度
+        '''
         for episode in self.episodes:
+            # 每个episode被分成多个chunk，每个chunk的长度为chunk_size
+            # 这里的segment方法是将episode分成多个片段，然后采样器中一个片段
             chunks = [episode.segment(start=i * chunk_size, stop=(i + 1) * chunk_size, should_pad=True) for i in range(math.ceil(len(episode) / chunk_size))]
+            # 然后再将每个chunk分成多个batch，每个batch的大小为batch_num_samples
             batches = [chunks[i * batch_num_samples: (i + 1) * batch_num_samples] for i in range(math.ceil(len(chunks) / batch_num_samples))]
             for b in batches:
+                # 再将batch返回
                 yield self._collate_episodes_segments(b)
 
     def update_disk_checkpoint(self, directory: Path) -> None:

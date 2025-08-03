@@ -75,9 +75,11 @@ class WorldModelEnv:
         '''
         assert self.keys_values_wm is not None and self.num_observations_tokens is not None
 
+        # 它决定了世界模型需要进行多少次前向传播来完成一个完整的环境步骤 todo 了解实际调试时具体的数据
+        # 表示需要 1 次用于动作处理 + K 次用于预测观察 tokens
         num_passes = 1 + self.num_observations_tokens if should_predict_next_obs else 1
 
-        output_sequence, obs_tokens = [], []
+        output_sequence, obs_tokens = [], [] # 用于存储世界模型每次前向传播的输出序列, 存储世界模型预测的输出序列和观察 tokens
 
         if self.keys_values_wm.size + num_passes > self.world_model.config.max_tokens:
             # 如果超过了最大tokens数量，则刷新键值缓存，应该是去除了过于旧的tokens
@@ -89,19 +91,22 @@ class WorldModelEnv:
         for k in range(num_passes):  # assumption that there is only one action token.
             
             # 这里的世界模型应该是已经传入了一个起始的观察特征（obs_tokens），然后开始i模拟执行动作，预测下一个观察特征
+            # 区别在于是传入一帧的特征进去而不是一个完整的序列
+            # todo 根据后面的decode_obs_tokens，感觉每次预测的都只是一个图像的一小块的压缩特征表示？如果第一个传入的的动作的话，后面结合训练的代码验证下
             outputs_wm = self.world_model(token, past_keys_values=self.keys_values_wm)
             output_sequence.append(outputs_wm.output_sequence)
 
-            if k == 0: # 起始的时候
+            if k == 0: # 起始的时候，由于只有一次是动作处理，所以这里的输出是动作处理的结果
                 reward = Categorical(logits=outputs_wm.logits_rewards).sample().float().cpu().numpy().reshape(-1) - 1   # (B,)
                 done = Categorical(logits=outputs_wm.logits_ends).sample().cpu().numpy().astype(bool).reshape(-1)       # (B,)
 
             if k < self.num_observations_tokens:
+                # 后续是处理观察特征的预测，所以这里将token转换为下一个观察特征的token
                 token = Categorical(logits=outputs_wm.logits_observations).sample()
                 obs_tokens.append(token)
 
-        output_sequence = torch.cat(output_sequence, dim=1)   # (B, 1 + K, E)
-        self.obs_tokens = torch.cat(obs_tokens, dim=1)        # (B, K)
+        output_sequence = torch.cat(output_sequence, dim=1)   # (B, 1 + K, E) 第一个位置 (dim=1 索引 0) 是动作的表示，后续 K 个位置 (dim=1 索引 1:K+1) 是预测的观察 tokens 的表示
+        self.obs_tokens = torch.cat(obs_tokens, dim=1)        # (B, K) 将预测的观察 tokens 拼接起来，形状为 (B, K)，K 是观察特征的数量
 
         obs = self.decode_obs_tokens() if should_predict_next_obs else None
         return obs, reward, done, None

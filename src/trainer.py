@@ -150,9 +150,11 @@ class Trainer:
 
             if self.cfg.evaluation.should and (epoch % self.cfg.evaluation.every == 0):
                 self.test_dataset.clear()
+                # 因为这边验证模型也只是计算损失，所以要收集数据
                 to_log += self.test_collector.collect(self.agent, epoch, **self.cfg.collection.test.config)
                 to_log += self.eval_agent(epoch)
 
+            # 保存模型
             if self.cfg.training.should:
                 self.save_checkpoint(epoch, save_agent_only=not self.cfg.common.do_checkpoint)
 
@@ -259,6 +261,15 @@ class Trainer:
 
     @torch.no_grad()
     def eval_component(self, component: nn.Module, batch_num_samples: int, sequence_length: int, **kwargs_loss: Any) -> Dict[str, float]:
+        '''
+        component: 传入待评估的模型，包含：tokenizer, world_model, actor_critic
+        batch_num_samples: 每个batch的样本数量
+        sequence_length: 序列长度，对应的长度：1， self.cfg.common.sequence_length, self.cfg.common.sequence_length
+        kwargs_loss: 其他损失函数的参数
+
+        合着这边验证模型也只是计算损失？
+        '''
+        
         loss_total_epoch = 0.0
         intermediate_losses = defaultdict(float)
 

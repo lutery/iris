@@ -89,6 +89,9 @@ def remove_dir(path, should_ask=False):
 
 
 def compute_lambda_returns(rewards, values, ends, gamma, lambda_):
+    '''
+    这里就是计算整个序列的 lambda returns 帧，也就是每一帧的回报
+    '''
     assert rewards.ndim == 2 or (rewards.ndim == 3 and rewards.size(2) == 1)
     assert rewards.shape == ends.shape == values.shape, f"{rewards.shape}, {values.shape}, {ends.shape}"  # (B, T, 1)
     t = rewards.size(1)

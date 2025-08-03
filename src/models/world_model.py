@@ -72,7 +72,7 @@ class WorldModel(nn.Module):
         )
 
         # todo 以下三个的作用？
-        # 这里应该是观察头
+        # 这里应该是观察头，将特征转换为观察的token 词表大小是 obs_vocab_size
         self.head_observations = Head(
             max_blocks=config.max_blocks,
             block_mask=all_but_last_obs_tokens_pattern,
@@ -113,7 +113,7 @@ class WorldModel(nn.Module):
 
     def forward(self, tokens: torch.LongTensor, past_keys_values: Optional[KeysValues] = None) -> WorldModelOutput:
         '''
-        tokens: 包含了观察和动作的tokens，(N, T(H/4*W/4+1))
+        tokens: 包含了观察和动作的tokens，(N, T(H/4*W/4+1)) / 在动作评价模型训练时，这里仅传入一个时间帧，现传入动作，后传入观察，一步一步的进行预测
         past_keys_values: todo 在训练world_model时传入的是None
         '''
 
